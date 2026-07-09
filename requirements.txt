@@ -1,0 +1,12 @@
+numpy
+pandas
+scipy
+matplotlib
+scikit-learn
+pyarrow
+tensorflow
+keras-tuner
+huggingface_hub
+datasets
+tqdm
+Pillow
