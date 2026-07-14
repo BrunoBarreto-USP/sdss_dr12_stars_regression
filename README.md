@@ -8,7 +8,8 @@ The code covers the full pipeline:
 - build the compact preprocessed NPZ used for training,
 - run the Bayesian hyperparameter search,
 - train the selected paper model,
-- generate the main evaluation figure and test metrics.
+- generate the main evaluation figure and test metrics,
+- optionally compare the paper model with OLS, Ridge, a StarNet-style CNN, and a Li-style DNN baseline.
 
 ## Paper Workflow
 
@@ -18,7 +19,7 @@ The notebook follows the same sequence described in the paper:
 2. resample each spectrum to a common 4000-point log-wavelength grid,
 3. shift spectra to the stellar rest frame,
 4. standardize each spectrum individually and scale targets with `RobustScaler`,
-5. compare against linear baselines (`OLS` and `Ridge`),
+5. optionally compare against `OLS`, `Ridge`, a StarNet-style CNN, and a Li-style DNN,
 6. tune and train the residual multitask neural network,
 7. report scatter plots, MAE, and SNR-binned error statistics.
 
@@ -28,6 +29,10 @@ The saved paper-model metrics in this checkout are approximately:
 - `[Fe/H]` MAE: `0.101 dex`
 - `log g` MAE: `0.130 dex`
 - trainable parameters: `542,771`
+
+The CNN and Li-style DNN are controlled comparison baselines: they use the
+same compact processed spectra, split, and optional augmentation as the paper
+model. They are not exact reproductions of the original external papers.
 
 ## Main Entry Point
 
@@ -79,5 +84,6 @@ Running the notebook can create these local artifacts:
 - `results_and_evaluations/paper_hyperparams_metrics.json`
 - `results_and_evaluations/paper_model_test_metrics.json`
 - `results_and_evaluations/paper_model_snr_error_stats.csv`
+- `results_and_evaluations/classical_benchmark_results.csv`
 
 These outputs are local working artifacts and should generally stay out of Git.
