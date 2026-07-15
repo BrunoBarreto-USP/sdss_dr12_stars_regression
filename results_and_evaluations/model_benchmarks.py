@@ -39,7 +39,7 @@ _LI_HIDDEN_UNITS = (1000, 500, 100, 30)
 _LI_PRETRAIN_UNITS = _LI_HIDDEN_UNITS + (1,)
 _LI_AE_MAX_EPOCHS = 20
 _LI_AE_LEARNING_RATE = 1e-3
-_LI_SUPERVISED_LEARNING_RATE = 0.003615484373485167
+_LI_SUPERVISED_LEARNING_RATE = 1e-4
 _LI_ADAMW_WEIGHT_DECAY = 3.958271671901557e-05
 
 
@@ -90,6 +90,7 @@ def _make_row(
     epochs: int | float = float("nan"),
     pretrain_epochs: int | float = float("nan"),
     weight_decay: float = float("nan"),
+    ae_l2_weight_decay: float = float("nan"),
     aug_factor: int | float = float("nan"),
 ) -> dict[str, object]:
     return {
@@ -102,6 +103,7 @@ def _make_row(
         "epochs": epochs,
         "pretrain_epochs": pretrain_epochs,
         "weight_decay": weight_decay,
+        "ae_l2_weight_decay": ae_l2_weight_decay,
         "aug_factor": aug_factor,
     }
 
@@ -355,11 +357,11 @@ def _pretrain_li_encoders(
     return encoder_weights
 
 
-def _make_checkpoint_callback(weights_path: str) -> object:
+def _make_checkpoint_callback(weights_path: str, *, monitor: str = "val_loss") -> object:
     tf = _tf()
     return tf.keras.callbacks.ModelCheckpoint(
         weights_path,
-        monitor="val_loss",
+        monitor=monitor,
         mode="min",
         save_best_only=True,
         save_weights_only=True,
@@ -451,7 +453,7 @@ def _train_li_dnn_ensemble(
         )
         with tempfile.TemporaryDirectory(prefix=f"benchmark_{target_key}_") as tmpdir:
             weights_path = os.path.join(tmpdir, "best.weights.h5")
-            callbacks = [_make_checkpoint_callback(weights_path)]
+            callbacks = [_make_checkpoint_callback(weights_path, monitor="val_mae")]
             model.fit(
                 X_train,
                 y_train_dict[target_key],
@@ -481,7 +483,8 @@ def _train_li_dnn_ensemble(
         train_samples=int(X_train.shape[0]),
         epochs=epochs,
         pretrain_epochs=actual_pretrain_epochs,
-        weight_decay=weight_decay,
+        weight_decay=_LI_ADAMW_WEIGHT_DECAY,
+        ae_l2_weight_decay=weight_decay,
     )
 
 
@@ -508,6 +511,14 @@ def run_neural_benchmarks(
 ) -> list[dict[str, object]]:
     """Fit neural baselines on the same split and augmentation regime as the paper model."""
     results: list[dict[str, object]] = list(_prior_results or [])
+
+    if include_cnn or include_li_dnn:
+        tf = _tf()
+        tf.keras.utils.set_random_seed(seed)
+        try:
+            tf.config.experimental.enable_op_determinism()
+        except Exception:
+            pass
 
     y_train_dict, y_val_dict = prepare_multitask_dicts(y_train, y_val)
     y_train_dict, y_val_dict = _cast_target_dicts_to_float32(y_train_dict, y_val_dict)

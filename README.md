@@ -16,14 +16,13 @@ The code covers the full pipeline:
 The notebook follows the same sequence described in the paper:
 
 1. load the SDSS DR12 benchmark split (`30k` train, `5k` validation, `15k` test),
-2. resample each spectrum to a common 4000-point log-wavelength grid,
-3. shift spectra to the stellar rest frame,
-4. standardize each spectrum individually and scale targets with `RobustScaler`,
+2. use the released 4000-point processed spectral representation,
+3. build a compact NPZ and scale targets with `RobustScaler`,
 5. optionally compare against `OLS`, `Ridge`, a StarNet-style CNN, and a Li-style DNN,
 6. tune and train the residual multitask neural network,
 7. report scatter plots, MAE, and SNR-binned error statistics.
 
-The saved paper-model metrics in this checkout are approximately:
+The paper-model metrics reported for this workflow are approximately:
 
 - `Teff` MAE: `59.5 K`
 - `[Fe/H]` MAE: `0.101 dex`
@@ -36,7 +35,7 @@ model. They are not exact reproductions of the original external papers.
 
 ## Main Entry Point
 
-Use [orchestration.ipynb](/C:/Users/barre/Desktop/github_submission_clean/github_submission_clean/orchestration.ipynb) as the main entry point. It is the only README-guided workflow in this repository and is organized to mirror the paper sections.
+Use [orchestration.ipynb](orchestration.ipynb) as the main entry point. It is the only README-guided workflow in this repository and is organized to mirror the paper sections.
 
 ## Repository Structure
 
