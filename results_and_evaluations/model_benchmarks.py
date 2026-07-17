@@ -19,6 +19,7 @@ import tempfile
 import time
 import warnings
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -381,6 +382,7 @@ def _train_fabbro_cnn(
     *,
     epochs: int,
     batch_size: int,
+    model_output_dir: Path | None = None,
 ) -> dict[str, object]:
     model = _build_fabbro_cnn(X_train.shape[1])
     with tempfile.TemporaryDirectory(prefix="benchmark_cnn_") as tmpdir:
@@ -399,6 +401,8 @@ def _train_fabbro_cnn(
         )
         fit_time = time.perf_counter() - t0
         model.load_weights(weights_path)
+        if model_output_dir is not None:
+            model.save(model_output_dir / "fabbro_cnn.keras")
 
         predictions = np.asarray(
             model.predict(X_test[..., np.newaxis], batch_size=batch_size, verbose=0),
@@ -430,6 +434,7 @@ def _train_li_dnn_ensemble(
     batch_size: int,
     pretrain_epochs: int,
     weight_decay: float,
+    model_output_dir: Path | None = None,
 ) -> dict[str, object]:
     predictions_scaled = np.empty_like(y_test, dtype=np.float32)
     total_params = 0
@@ -464,6 +469,8 @@ def _train_li_dnn_ensemble(
                 verbose=1,
             )
             model.load_weights(weights_path)
+        if model_output_dir is not None:
+            model.save(model_output_dir / f"li_dnn_{target_key.removesuffix('_output')}.keras")
         target_idx = _TARGET_KEY_TO_INDEX[target_key]
         predictions_scaled[:, target_idx] = model.predict(
             X_test,
@@ -507,10 +514,14 @@ def run_neural_benchmarks(
     batch_size: int = 256,
     li_pretrain_epochs: int = _LI_AE_MAX_EPOCHS,
     li_weight_decay: float = 1e-4,
+    model_output_dir: str | Path | None = None,
     _prior_results: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     """Fit neural baselines on the same split and augmentation regime as the paper model."""
     results: list[dict[str, object]] = list(_prior_results or [])
+    output_dir = Path(model_output_dir) if model_output_dir is not None else None
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     if include_cnn or include_li_dnn:
         tf = _tf()
@@ -552,6 +563,7 @@ def run_neural_benchmarks(
             target_names,
             epochs=epochs,
             batch_size=batch_size,
+            model_output_dir=output_dir,
         )
         cnn_row["aug_factor"] = aug_factor
         results.append(cnn_row)
@@ -573,6 +585,7 @@ def run_neural_benchmarks(
             batch_size=batch_size,
             pretrain_epochs=li_pretrain_epochs,
             weight_decay=li_weight_decay,
+            model_output_dir=output_dir,
         )
         dnn_row["aug_factor"] = aug_factor
         results.append(dnn_row)
@@ -618,8 +631,9 @@ def run_all_benchmarks(
     neural_batch_size: int = 256,
     li_pretrain_epochs: int = _LI_AE_MAX_EPOCHS,
     li_weight_decay: float = 1e-4,
+    model_output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
-    """Run the benchmark set and return a results DataFrame."""
+    """Run the benchmark set and optionally save fitted neural models."""
     print("=" * 60)
     print("Running classical benchmarks: OLS and Ridge")
     if include_neural_baselines:
@@ -654,6 +668,7 @@ def run_all_benchmarks(
             batch_size=neural_batch_size,
             li_pretrain_epochs=li_pretrain_epochs,
             li_weight_decay=li_weight_decay,
+            model_output_dir=model_output_dir,
             _prior_results=results,
         )
     return pd.DataFrame(results)

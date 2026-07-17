@@ -11,6 +11,9 @@ The code covers the full pipeline:
 - generate the main evaluation figure and test metrics,
 - optionally compare the paper model with OLS, Ridge, a StarNet-style CNN, and a Li-style DNN baseline.
 
+An optional GPU-only PyTorch spectral Transformer is also provided for a
+larger attention-based comparison. It is not part of the default notebook run.
+
 ## Paper Workflow
 
 The notebook follows the same sequence described in the paper:
@@ -18,8 +21,9 @@ The notebook follows the same sequence described in the paper:
 1. load the SDSS DR12 benchmark split (`30k` train, `5k` validation, `15k` test),
 2. use the released 4000-point processed spectral representation,
 3. build a compact NPZ and scale targets with `RobustScaler`,
-5. optionally compare against `OLS`, `Ridge`, a StarNet-style CNN, and a Li-style DNN,
-6. tune and train the residual multitask neural network,
+4. optionally compare against `OLS`, `Ridge`, a StarNet-style CNN, and a Li-style DNN,
+5. tune and train the residual multitask neural network,
+6. run the residual, layer-normalization, and multitask ablations,
 7. report scatter plots, MAE, and SNR-binned error statistics.
 
 The paper-model metrics reported for this workflow are approximately:
@@ -47,6 +51,7 @@ data_exploration/            Figures and exploratory summaries used in the paper
 model_definitions/           Residual multitask MLP and tuner builders
 training/                    Hyperparameter search and fixed-model training
 results_and_evaluations/     Metrics, baselines, scatter plots, and SNR analysis
+finetuning/                  Optional GPU-only PyTorch spectral Transformer
 data/                        Local dataset cache and compact benchmark files
 models/                      Saved trained models and weights
 figs/                        Generated figures
@@ -71,6 +76,30 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+## Optional Spectral Transformer
+
+`finetuning/train_spectral_transformer.py` implements a 1-D ViT-style
+regressor with 16-pixel wavelength patches, a CLS token, learned positional
+embeddings, and six Transformer encoder layers (`d_model=256`, 8 heads).
+
+Training this model on CPU is impractically slow. Use a CUDA-enabled PyTorch
+installation and a GPU; CPU execution is blocked by default and is available
+only through `--allow-cpu` for a small debugging run.
+
+Install the PyTorch build matching the CUDA version of the training machine,
+then run:
+
+```powershell
+python .\finetuning\train_spectral_transformer.py
+```
+
+Architecturally, this is closest to the Vision Transformer of
+[Dosovitskiy et al. (2021)](https://arxiv.org/abs/2010.11929), built on the
+Transformer encoder of [Vaswani et al. (2017)](https://arxiv.org/abs/1706.03762).
+The astronomy-specific [Spectral Transformer (SPT)](https://doi.org/10.1051/0004-6361/202347994)
+is a relevant domain reference, but it uses a different attention mechanism
+and predicts red-giant age and mass rather than these three atmospheric labels.
+
 ## What Gets Generated
 
 Running the notebook can create these local artifacts:
@@ -79,10 +108,12 @@ Running the notebook can create these local artifacts:
 - `data/sdss_dr12_processed_flux_benchmark.npz`
 - `models/paper_hyperparams_model.keras`
 - `models/paper_hyperparams_best.weights.h5`
+- `models/benchmarks/fabbro_cnn.keras` and `models/benchmarks/li_dnn_*.keras`
 - `figs/paper_model_reference_vs_predicted.png`
 - `results_and_evaluations/paper_hyperparams_metrics.json`
 - `results_and_evaluations/paper_model_test_metrics.json`
 - `results_and_evaluations/paper_model_snr_error_stats.csv`
 - `results_and_evaluations/classical_benchmark_results.csv`
+- `results_and_evaluations/paper_ablations/ablation_summary.csv`
 
 These outputs are local working artifacts and should generally stay out of Git.

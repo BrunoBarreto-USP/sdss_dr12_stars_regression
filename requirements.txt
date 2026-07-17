@@ -10,3 +10,5 @@ huggingface_hub
 datasets
 tqdm
 Pillow
+# Optional GPU baseline: install the CUDA-enabled PyTorch build appropriate for the host.
+torch

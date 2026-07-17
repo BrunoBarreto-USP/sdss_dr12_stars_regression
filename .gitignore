@@ -15,6 +15,7 @@ data/*.npz
 models/*.keras
 models/*.h5
 models/*.weights.h5
+models/benchmarks/
 figs/*.png
 figs/*.pdf
 results_and_evaluations/*.csv
@@ -23,6 +24,8 @@ results_and_evaluations/keras_tuner/
 results_and_evaluations/pod_*/
 results_and_evaluations/table1_final/
 results_and_evaluations/li_*/
+results_and_evaluations/paper_ablations/
+results_and_evaluations/spectral_transformer/
 
 Thumbs.db
 .DS_Store

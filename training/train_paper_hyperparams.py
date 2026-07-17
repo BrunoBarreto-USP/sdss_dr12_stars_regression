@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -44,6 +45,17 @@ DEFAULT_WEIGHTS = PROJECT_ROOT / "models" / "paper_hyperparams_best.weights.h5"
 DEFAULT_RESULTS = PROJECT_ROOT / "results_and_evaluations" / "paper_hyperparams_metrics.json"
 TARGET_KEYS = ("teff_output", "feh_output", "logg_output")
 TARGET_LABELS = ("Teff", "[Fe/H]", "log g")
+
+
+def _set_seed(seed: int) -> None:
+    """Make model initialization, dropout, and data ordering reproducible."""
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.keras.utils.set_random_seed(seed)
+    try:
+        tf.config.experimental.enable_op_determinism()
+    except Exception:
+        pass
 
 
 class FixedPaperHP:
@@ -177,6 +189,7 @@ def build_paper_fixed_model(
 
 
 def train_paper_model(args: argparse.Namespace) -> dict[str, object]:
+    _set_seed(args.seed)
     if args.cpu:
         runtime = configure_cpu_runtime()
     else:
