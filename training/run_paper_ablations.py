@@ -37,7 +37,7 @@ from training.train_paper_hyperparams import FixedPaperHP
 from training.training import (
     NORMALIZED_MAE_SUM_NAME,
     NormalizedMaeSumCallback,
-    _compute_target_variances,
+    _compute_target_standard_deviations,
     _create_dataset,
     cast_target_dicts_to_float32,
     compute_inverse_variance_loss_weights,
@@ -219,7 +219,7 @@ def _train_multitask_variant(
     x_val: np.ndarray,
     y_val: dict[str, np.ndarray],
     x_test: np.ndarray,
-    target_variances: dict[str, float],
+    target_standard_deviations: dict[str, float],
     loss_weights: dict[str, float],
     args: argparse.Namespace,
 ) -> tuple[np.ndarray, int]:
@@ -240,7 +240,7 @@ def _train_multitask_variant(
         validation_data=_create_dataset(x_val, y_val, args.batch_size, shuffle=False, cache=args.cache),
         epochs=args.epochs,
         callbacks=[
-            NormalizedMaeSumCallback(target_variances, TARGET_KEYS),
+            NormalizedMaeSumCallback(target_standard_deviations, TARGET_KEYS),
             tf.keras.callbacks.ModelCheckpoint(
                 checkpoint,
                 monitor=f"val_{NORMALIZED_MAE_SUM_NAME}",
@@ -356,7 +356,7 @@ def run_paper_ablations(args: argparse.Namespace) -> pd.DataFrame:
             seed=args.seed,
         )
     y_train_aug = np.column_stack([y_train_dict[name] for name in TARGET_KEYS])
-    target_variances = _compute_target_variances(y_train_dict, TARGET_KEYS)
+    target_standard_deviations = _compute_target_standard_deviations(y_train_dict, TARGET_KEYS)
     loss_weights = compute_inverse_variance_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
     scalers = _target_scalers_from_npz(data)
 
@@ -383,7 +383,7 @@ def run_paper_ablations(args: argparse.Namespace) -> pd.DataFrame:
                 x_val=x_val,
                 y_val=y_val_dict,
                 x_test=x_test,
-                target_variances=target_variances,
+                target_standard_deviations=target_standard_deviations,
                 loss_weights=loss_weights,
                 args=args,
             )

@@ -22,7 +22,7 @@ from model_definitions.model_definitions import DEFAULT_COSINE_ALPHA, build_expo
 from training.training import (
     NORMALIZED_MAE_SUM_NAME,
     NormalizedMaeSumCallback,
-    _compute_target_variances,
+    _compute_target_standard_deviations,
     _create_dataset,
     _score_from_eval_results,
     cast_target_dicts_to_float32,
@@ -142,7 +142,7 @@ def train_best_trial(args: argparse.Namespace) -> dict[str, object]:
             seed=args.seed,
         )
 
-    target_variances = _compute_target_variances(y_train_dict, TARGET_KEYS)
+    target_standard_deviations = _compute_target_standard_deviations(y_train_dict, TARGET_KEYS)
     loss_weights = compute_inverse_variance_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
     total_steps = int(x_train.shape[0] // args.batch_size) * args.epochs
 
@@ -164,7 +164,7 @@ def train_best_trial(args: argparse.Namespace) -> dict[str, object]:
     monitor = f"val_{NORMALIZED_MAE_SUM_NAME}"
     args.weights.parent.mkdir(parents=True, exist_ok=True)
     callbacks = [
-        NormalizedMaeSumCallback(target_variances, TARGET_KEYS),
+        NormalizedMaeSumCallback(target_standard_deviations, TARGET_KEYS),
         tf.keras.callbacks.ModelCheckpoint(
             str(args.weights),
             monitor=monitor,
@@ -181,7 +181,7 @@ def train_best_trial(args: argparse.Namespace) -> dict[str, object]:
     val_eval = model.evaluate(val_dataset, return_dict=True, verbose=0)
     val_normalized_mae_sum = _score_from_eval_results(
         val_eval,
-        target_variances=target_variances,
+        target_standard_deviations=target_standard_deviations,
         target_keys=TARGET_KEYS,
     )
     val_mae = _physical_mae(model, x_val, y_val, data, batch_size=args.batch_size)

@@ -29,7 +29,7 @@ from model_definitions.model_definitions import (
 from training.training import (
     NORMALIZED_MAE_SUM_NAME,
     NormalizedMaeSumCallback,
-    _compute_target_variances,
+    _compute_target_standard_deviations,
     _create_dataset,
     _score_from_eval_results,
     cast_target_dicts_to_float32,
@@ -216,7 +216,7 @@ def train_paper_model(args: argparse.Namespace) -> dict[str, object]:
             seed=args.seed,
         )
 
-    target_variances = _compute_target_variances(y_train_dict, TARGET_KEYS)
+    target_standard_deviations = _compute_target_standard_deviations(y_train_dict, TARGET_KEYS)
     loss_weights = compute_inverse_variance_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
     total_steps = int(x_train.shape[0] // args.batch_size) * args.epochs
 
@@ -241,7 +241,7 @@ def train_paper_model(args: argparse.Namespace) -> dict[str, object]:
     args.weights.parent.mkdir(parents=True, exist_ok=True)
     monitor = f"val_{NORMALIZED_MAE_SUM_NAME}"
     callbacks = [
-        NormalizedMaeSumCallback(target_variances, TARGET_KEYS),
+        NormalizedMaeSumCallback(target_standard_deviations, TARGET_KEYS),
         tf.keras.callbacks.ModelCheckpoint(
             str(args.weights),
             monitor=monitor,
@@ -265,7 +265,7 @@ def train_paper_model(args: argparse.Namespace) -> dict[str, object]:
     val_eval = model.evaluate(val_dataset, return_dict=True, verbose=0)
     val_normalized_mae_sum = _score_from_eval_results(
         val_eval,
-        target_variances=target_variances,
+        target_standard_deviations=target_standard_deviations,
         target_keys=TARGET_KEYS,
     )
     scalers = _target_scalers_from_npz(data)

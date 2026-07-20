@@ -208,15 +208,26 @@ def _compute_target_variances(
     }
 
 
+def _compute_target_standard_deviations(
+    y_dict: dict[str, np.ndarray],
+    target_keys: Sequence[str],
+) -> dict[str, float]:
+    """Return target scales for dimensionless MAE model selection."""
+    return {
+        key: float(np.std(y_dict[key], dtype=np.float64))
+        for key in target_keys
+    }
+
+
 def _score_from_eval_results(
     eval_results: dict[str, float],
     *,
-    target_variances: dict[str, float],
+    target_standard_deviations: dict[str, float],
     target_keys: Sequence[str],
 ) -> float:
     score = 0.0
     for key in target_keys:
-        score += float(eval_results[f"{key}_mae"]) / target_variances[key]
+        score += float(eval_results[f"{key}_mae"]) / target_standard_deviations[key]
     return score
 
 
@@ -240,15 +251,15 @@ class NormalizedMaeSumCallback(Callback):
 
     def __init__(
         self,
-        target_variances: dict[str, float],
+        target_standard_deviations: dict[str, float],
         target_keys: Sequence[str],
         metric_name: str = NORMALIZED_MAE_SUM_NAME,
     ) -> None:
         super().__init__()
         self.target_keys = list(target_keys)
         self.metric_name = metric_name
-        self.target_variances = {
-            key: max(float(target_variances[key]), 1e-8)
+        self.target_standard_deviations = {
+            key: max(float(target_standard_deviations[key]), 1e-8)
             for key in self.target_keys
         }
 
@@ -258,7 +269,7 @@ class NormalizedMaeSumCallback(Callback):
             mae_value = logs.get(f"{prefix}{key}_mae")
             if mae_value is None:
                 return None
-            total += float(mae_value) / self.target_variances[key]
+            total += float(mae_value) / self.target_standard_deviations[key]
         return total
 
     def on_epoch_end(self, epoch, logs=None) -> None:
@@ -348,7 +359,10 @@ def tune_and_train(
     weights_checkpoint_path = f"{os.path.splitext(model_checkpoint_path)[0]}.weights.h5"
     monitor = f"val_{NORMALIZED_MAE_SUM_NAME}"
     print(f"Training architecture: {architecture}")
-    print("Scaled target variances for normalized MAE monitoring:", target_variances)
+    print(
+        "Scaled target standard deviations for normalized MAE monitoring:",
+        target_standard_deviations,
+    )
     print(f"Monitoring '{monitor}' for tuning and checkpoint selection")
     print(f"Search epochs: {search_epochs}, Final train epochs: {final_train_epochs}")
     print(
@@ -417,7 +431,7 @@ def tune_and_train(
         epochs=search_epochs,
         validation_data=val_dataset,
         callbacks=[
-            NormalizedMaeSumCallback(target_variances, target_keys),
+            NormalizedMaeSumCallback(target_standard_deviations, target_keys),
         ],
         verbose=1,
     )
@@ -443,7 +457,7 @@ def tune_and_train(
     model = build_model(hp=best_hp, **final_build_kwargs)
 
     callbacks = [
-        NormalizedMaeSumCallback(target_variances, target_keys),
+        NormalizedMaeSumCallback(target_standard_deviations, target_keys),
         ModelCheckpoint(
             weights_checkpoint_path,
             monitor=monitor,
@@ -478,7 +492,7 @@ def tune_and_train(
             jit_compile=jit_compile,
         )
         ft_callbacks = [
-            NormalizedMaeSumCallback(target_variances, target_keys),
+            NormalizedMaeSumCallback(target_standard_deviations, target_keys),
             ModelCheckpoint(
                 ft_checkpoint_path,
                 monitor=monitor,
@@ -511,7 +525,7 @@ def tune_and_train(
     )
     best_score = _score_from_eval_results(
         eval_results,
-        target_variances=target_variances,
+        target_standard_deviations=target_standard_deviations,
         target_keys=target_keys,
     )
     print(f"Final {monitor}: {best_score:.4f}")
