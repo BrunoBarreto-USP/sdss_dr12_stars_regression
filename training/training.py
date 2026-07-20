@@ -350,7 +350,10 @@ def tune_and_train(
     input_dim = X_train_features.shape[1]
     n_train = X_train_features.shape[0]
     target_keys = _resolve_target_keys(y_train_dict_float32)
-    target_variances = _compute_target_variances(y_train_dict_float32, target_keys)
+    target_standard_deviations = _compute_target_standard_deviations(
+        y_train_dict_float32,
+        target_keys,
+    )
     loss_weights = compute_inverse_variance_loss_weights(
         y_train_dict_float32,
         target_keys=target_keys,
