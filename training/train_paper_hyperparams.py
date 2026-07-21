@@ -65,16 +65,16 @@ class FixedPaperHP:
         "initial_units": 128,
         "initial_dropout": 0.0,
         "shared_blocks": 1,
-        "block_units": 64,
-        "trunk_dropout": 0.4,
-        "teff_output_head_template": "(48, 32)",
+        "block_units": 32,
+        "trunk_dropout": 0.0,
+        "teff_output_head_template": "(16)",
         "teff_output_head_dropout": 0.0,
-        "feh_output_head_template": "(16,)",
+        "feh_output_head_template": "(48, 32, 16)",
         "feh_output_head_dropout": 0.0,
-        "logg_output_head_template": "(48,)",
+        "logg_output_head_template": "(48, 32, 16)",
         "logg_output_head_dropout": 0.0,
-        "learning_rate": 7.0e-4,
-        "weight_decay": 1.0e-2,
+        "learning_rate": 5.0e-3,
+        "weight_decay": 1.0e-5,
     }
 
 
