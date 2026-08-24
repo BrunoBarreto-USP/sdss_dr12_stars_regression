@@ -285,22 +285,26 @@ class NormalizedMaeSumCallback(Callback):
             logs[f"val_{self.metric_name}"] = val_metric
 
 
-def compute_inverse_variance_loss_weights(
+def compute_inverse_standard_deviation_loss_weights(
     y_train_dict_float32: dict[str, np.ndarray],
     target_keys: Sequence[str] = DEFAULT_TARGET_KEYS,
 ) -> dict[str, float]:
-    target_variances = _compute_target_variances(y_train_dict_float32, target_keys)
-    inverse_variance_weights = {
-        key: 1.0 / max(variance, 1e-8)
-        for key, variance in target_variances.items()
+    """Balance Huber losses by the inverse scaled-target standard deviation."""
+    target_standard_deviations = _compute_target_standard_deviations(
+        y_train_dict_float32,
+        target_keys,
+    )
+    inverse_standard_deviation_weights = {
+        key: 1.0 / max(standard_deviation, 1e-8)
+        for key, standard_deviation in target_standard_deviations.items()
     }
-    normalization = len(target_keys) / sum(inverse_variance_weights.values())
+    normalization = len(target_keys) / sum(inverse_standard_deviation_weights.values())
     loss_weights = {
-        key: inverse_variance_weights[key] * normalization
+        key: inverse_standard_deviation_weights[key] * normalization
         for key in target_keys
     }
-    print("Scaled target variances:", target_variances)
-    print("Normalized loss weights (sum matches output count):", loss_weights)
+    print("Scaled target standard deviations:", target_standard_deviations)
+    print("Inverse-SD Huber loss weights (sum matches output count):", loss_weights)
     return loss_weights
 
 
@@ -354,7 +358,7 @@ def tune_and_train(
         y_train_dict_float32,
         target_keys,
     )
-    loss_weights = compute_inverse_variance_loss_weights(
+    loss_weights = compute_inverse_standard_deviation_loss_weights(
         y_train_dict_float32,
         target_keys=target_keys,
     )

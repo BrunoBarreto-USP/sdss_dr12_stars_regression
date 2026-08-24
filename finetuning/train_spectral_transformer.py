@@ -139,8 +139,10 @@ def _augment(features: np.ndarray, targets: np.ndarray, *, factor: int, noise_le
 
 
 def _loss_weights(targets: np.ndarray, device: torch.device) -> torch.Tensor:
-    inverse_variance = 1.0 / np.maximum(np.var(targets, axis=0), 1e-8)
-    weights = inverse_variance * (len(inverse_variance) / inverse_variance.sum())
+    inverse_standard_deviation = 1.0 / np.maximum(np.std(targets, axis=0), 1e-8)
+    weights = inverse_standard_deviation * (
+        len(inverse_standard_deviation) / inverse_standard_deviation.sum()
+    )
     return torch.tensor(weights, dtype=torch.float32, device=device)
 
 

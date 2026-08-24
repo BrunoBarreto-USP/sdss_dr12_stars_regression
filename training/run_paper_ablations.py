@@ -40,7 +40,7 @@ from training.training import (
     _compute_target_standard_deviations,
     _create_dataset,
     cast_target_dicts_to_float32,
-    compute_inverse_variance_loss_weights,
+    compute_inverse_standard_deviation_loss_weights,
     configure_cpu_runtime,
     configure_gpu_runtime,
 )
@@ -357,7 +357,7 @@ def run_paper_ablations(args: argparse.Namespace) -> pd.DataFrame:
         )
     y_train_aug = np.column_stack([y_train_dict[name] for name in TARGET_KEYS])
     target_standard_deviations = _compute_target_standard_deviations(y_train_dict, TARGET_KEYS)
-    loss_weights = compute_inverse_variance_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
+    loss_weights = compute_inverse_standard_deviation_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
     scalers = _target_scalers_from_npz(data)
 
     rows: list[dict[str, float | int | str]] = []
