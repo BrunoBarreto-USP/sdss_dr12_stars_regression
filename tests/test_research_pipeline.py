@@ -140,14 +140,9 @@ class ResearchPipelineTests(unittest.TestCase):
             compute_inverse_variance_loss_weights({"a": np.ones(3)}, ("a",))
 
     def test_archived_trial_selection_uses_recorded_training_scales(self):
-        run = ROOT / "outputs/paper_figures/single_column/corrected_best_trial"
-        config = json.loads((run / "run_config.json").read_text())
-        trial = json.loads(
-            (
-                ROOT
-                / "results_and_evaluations/keras_tuner/stellar_baseline_orchestration/trial_099/trial.json"
-            ).read_text()
-        )
+        config = json.loads((ROOT / "tests/fixtures/paper_reference.json").read_text())
+        from stellar_workflow.config import load_tuning_history
+        trial = next(t for t in load_tuning_history() if t["trial_id"] == "trial_099")
         values = {
             k: v["observations"][0]["value"][0]
             for k, v in trial["metrics"]["metrics"].items()
@@ -258,9 +253,11 @@ class ResearchPipelineTests(unittest.TestCase):
                 ids = np.arange(number * 3, number * 3 + 3)
                 frame = pd.DataFrame(labels, columns=TARGET_COLUMNS)
                 frame["spec_id"] = ids
+                data[f"X_{short}_features"] = np.zeros((len(ids), 4000), dtype=np.float32)
+                frame["processed_flux"] = list(data[f"X_{short}_features"])
                 frame.to_parquet(Path(folder) / f"{split}.parquet")
                 data[f"{short}_ids"] = ids
-                data[f"y_{short}_targets"] = (labels - [5000, -1, 2]) / [1000, 1, 1]
+                data[f"y_{short}_targets"] = ((labels - [5000, -1, 2]) / [1000, 1, 1]).astype(np.float32)
             data["label_robust_center"] = np.array([5000, -1, 2])
             data["label_robust_scale"] = np.array([1000, 1, 1])
             self.assertEqual(validate_compact_dataset(data, Path(folder))["test"], 3)

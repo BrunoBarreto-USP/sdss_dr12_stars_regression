@@ -1,4 +1,9 @@
 .venv/
+.superpowers/
+outputs/
+local_archive/
+*.log
+*.zip
 __pycache__/
 .pytest_cache/
 .mypy_cache/
@@ -12,9 +17,16 @@ htmlcov/
 
 data/*.parquet
 data/*.npz
+data/**/compact_manifest.json
+data/**/*.parquet
+data/**/*.npz
+data/**/*.partial
 models/*.keras
 models/*.h5
 models/*.weights.h5
+models/**/*.keras
+models/**/*.h5
+models/**/*.pt
 models/benchmarks/
 figs/*.png
 figs/*.pdf

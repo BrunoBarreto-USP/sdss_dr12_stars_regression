@@ -1,0 +1,14 @@
+{
+  "target_standard_deviations": {
+    "teff_output": 0.8944509666502438,
+    "feh_output": 0.7136309245790774,
+    "logg_output": 1.0078512884028525
+  },
+  "test_mae": {
+    "Teff": 58.717678043768856,
+    "[Fe/H]": 0.101314352274085,
+    "log g": 0.13186248224961317
+  },
+  "selected_epoch": 74,
+  "model_sha256": "3729f03501fb15f91030c3ee9624bcb720db9eebc30fc68e4e9634820237796f"
+}

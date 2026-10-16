@@ -1,16 +1,20 @@
-numpy
-pandas
-scipy
-matplotlib
-scikit-learn
-pyarrow
-astropy
-h5py
-tensorflow
-keras-tuner
-huggingface_hub
-datasets
-tqdm
-Pillow
-# Optional GPU baseline: install the CUDA-enabled PyTorch build appropriate for the host.
-torch
+# Python 3.11 core. TensorFlow uses CPU on native Windows; use Linux/WSL2 for CUDA.
+numpy==2.4.6
+pandas==3.0.6
+scipy==1.17.1
+matplotlib==3.11.2
+scikit-learn==1.9.1
+pyarrow==26.0.0
+astropy==8.0.2
+h5py==3.14.0
+tensorflow==2.21.0
+keras==3.15.1
+keras-tuner==1.4.8
+tensorboard==2.20.0
+huggingface_hub==2.2.0
+datasets==5.1.0
+tqdm==4.70.1
+Pillow==12.3.0
+requests==2.34.2
+filelock==4.2.0
+joblib==1.6.0

@@ -34,7 +34,7 @@ def main(split: str = "train", spectrum_index: int = 123, row_limit: int | None 
     if not (0 <= spectrum_index < len(flux)):
         raise IndexError(f"spectrum_index must satisfy 0 <= index < {len(flux)}")
 
-    wavelength = np.linspace(WAVELENGTH_START, WAVELENGTH_END, flux.shape[1])
+    wavelength = 10 ** np.linspace(3.5754, 3.9670, flux.shape[1])
     teff = labels_frame["catalog_teff"].to_numpy(dtype=np.float32)
     feh = labels_frame["catalog_feh"].to_numpy(dtype=np.float32)
     logg = labels_frame["catalog_logg"].to_numpy(dtype=np.float32)

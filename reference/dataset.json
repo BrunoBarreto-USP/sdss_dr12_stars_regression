@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "repo_id": "BrunoBarreto/sdss_dr12_stars_regression",
+  "revision": "882320daa2ede7c7b7aca9c7344b9b0e388f5425",
+  "license": "CC-BY-4.0",
+  "grid": {"log10_start": 3.5754, "log10_end": 3.967, "points": 4000},
+  "splits": {
+    "train": {"rows": 29422, "sha256": "63a4fa4d96fa27253e27954ddc53e0a0a6b59f4f2252176cd5e5ad31cc4307dc"},
+    "validation": {"rows": 4846, "sha256": "c26afb708b760037fd5d8e474a3c9ef1d5c97a358dc830b3d5aa5291d5f77312"},
+    "test": {"rows": 14443, "sha256": "f0684289aad573275c8a5dfd30ba1efa11d48680240ef2eb48aef8c08bb8b3b9"}
+  }
+}

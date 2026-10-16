@@ -1,0 +1,2 @@
+# Optional Transformer backend. For CUDA, install the corresponding official Torch wheel.
+torch==2.14.1

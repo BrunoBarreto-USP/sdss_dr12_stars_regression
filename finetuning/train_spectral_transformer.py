@@ -171,7 +171,8 @@ def _evaluate(
     return_arrays: bool = False,
 ) -> Metrics | tuple[Metrics, np.ndarray, np.ndarray]:
     model.eval()
-    losses: list[float] = []
+    total_loss = 0.0
+    total_objects = 0
     predictions: list[np.ndarray] = []
     targets: list[np.ndarray] = []
     with torch.no_grad():
@@ -181,13 +182,16 @@ def _evaluate(
             with _autocast(device, amp):
                 output = model(features)
                 loss = _weighted_huber(output, labels, weights)
-            losses.append(float(loss.cpu()))
+            total_loss += float(loss.cpu()) * len(labels)
+            total_objects += len(labels)
             predictions.append(output.float().cpu().numpy())
             targets.append(labels.float().cpu().numpy())
+    if not total_objects:
+        raise ValueError("Evaluation requires at least one object.")
     prediction_physical = np.concatenate(predictions) * scales + centers
     target_physical = np.concatenate(targets) * scales + centers
     mae = np.abs(prediction_physical - target_physical).mean(axis=0)
-    metrics = Metrics(float(np.mean(losses)), float(mae[0]), float(mae[1]), float(mae[2]))
+    metrics = Metrics(total_loss / total_objects, float(mae[0]), float(mae[1]), float(mae[2]))
     if return_arrays:
         return metrics, target_physical, prediction_physical
     return metrics
@@ -214,6 +218,11 @@ def _learning_rate(step: int, *, total_steps: int, warmup_steps: int, base: floa
 
 def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
     """Train the spectral transformer and save the best validation checkpoint."""
+    output_dir = Path(args.output_dir)
+    if any((output_dir / name).exists() for name in ("best_model.pt", "test_predictions.npz", "test_metrics.json", "history.json")):
+        raise FileExistsError("Transformer artifacts exist; choose a fresh output directory.")
+    if min(args.epochs, args.batch_size, args.eval_batch_size) < 1:
+        raise ValueError("Epoch and batch counts must be positive.")
     if not torch.cuda.is_available() and not args.allow_cpu:
         raise RuntimeError(
             "No CUDA GPU detected. SpectralTransformerRegressor is GPU-only by default because CPU training is too slow. "
@@ -224,10 +233,10 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
     _set_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     data_path = Path(args.data)
-    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with np.load(data_path, allow_pickle=True) as data:
+    from stellar_workflow.datasets import load_compact
+    with load_compact(data_path) as data:
         x_train = np.asarray(data["X_train_features"], dtype=np.float32)
         y_train = np.asarray(data["y_train_targets"], dtype=np.float32)
         x_val = np.asarray(data["X_val_features"], dtype=np.float32)
@@ -237,6 +246,7 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
         test_ids = np.asarray(data["test_ids"], dtype=np.int64)
         centers = np.asarray(data["label_robust_center"], dtype=np.float64).reshape(1, -1)
         scales = np.asarray(data["label_robust_scale"], dtype=np.float64).reshape(1, -1)
+        dataset_id = str(data["dataset_id"].item())
 
     x_train, y_train = _augment(x_train, y_train, factor=args.aug_factor, noise_level=args.noise_level, seed=args.seed)
     model = SpectralTransformerRegressor(
@@ -247,6 +257,8 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     weights = _loss_weights(y_train, device)
     train_loader = _make_loader(SpectrumDataset(x_train, y_train), args.batch_size, shuffle=True, workers=args.workers)
+    if not len(train_loader):
+        raise ValueError("Batch size exceeds the augmented training sample count.")
     val_loader = _make_loader(SpectrumDataset(x_val, y_val), args.eval_batch_size, shuffle=False, workers=args.workers)
     test_loader = _make_loader(SpectrumDataset(x_test, y_test), args.eval_batch_size, shuffle=False, workers=args.workers)
     total_steps = max(1, args.epochs * len(train_loader))
@@ -255,10 +267,12 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
     best_loss = float("inf")
     step = 0
+    history = []
 
     print(f"Device: {device}; trainable parameters: {sum(parameter.numel() for parameter in model.parameters()):,}")
     for epoch in range(1, args.epochs + 1):
         model.train()
+        train_loss, train_objects = 0., 0
         for features, labels in tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs}", dynamic_ncols=True):
             for group in optimizer.param_groups:
                 group["lr"] = _learning_rate(step, total_steps=total_steps, warmup_steps=warmup_steps, base=args.learning_rate, floor_ratio=args.min_lr_ratio)
@@ -272,13 +286,20 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
             scaler.step(optimizer)
             scaler.update()
             step += 1
+            train_loss += float(loss.detach().cpu()) * len(labels)
+            train_objects += len(labels)
 
         validation = _evaluate(model, val_loader, device=device, weights=weights, centers=centers, scales=scales, amp=amp)
         print(f"Validation: {validation}")
+        history.append({"epoch": epoch, "train_loss": train_loss / train_objects,
+                        "validation": asdict(validation), "selection_metric_version": "object_weighted_huber_v2"})
         if validation.loss < best_loss:
             best_loss = validation.loss
             saved_args = {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}
-            torch.save({"model": model.state_dict(), "args": saved_args, "validation": asdict(validation), "epoch": epoch}, output_dir / "best_model.pt")
+            import os
+            saved_args.update(data=Path(os.path.relpath(data_path, output_dir)).as_posix(), output_dir=".")
+            torch.save({"model": model.state_dict(), "args": saved_args, "validation": asdict(validation), "epoch": epoch,
+                        "dataset_id": dataset_id, "selection_metric_version": "object_weighted_huber_v2"}, output_dir / "best_model.pt")
 
     checkpoint = load_checkpoint(output_dir / "best_model.pt", map_location=device)
     model.load_state_dict(checkpoint["model"])
@@ -289,20 +310,17 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
     if y_true.shape != (len(test_ids), 3) or y_pred.shape != y_true.shape:
         raise ValueError("Test predictions are not aligned with test IDs.")
     predictions_path = output_dir / "test_predictions.npz"
-    np.savez_compressed(
-        predictions_path,
-        test_ids=test_ids,
-        target_names=np.asarray(["Teff", "[Fe/H]", "log g"]),
-        y_true=y_true,
-        y_pred=y_pred,
-    )
-    (output_dir / "test_metrics.json").write_text(json.dumps(asdict(test), indent=2), encoding="utf-8")
+    from stellar_workflow.predictions import write_predictions
+    from stellar_workflow.runs import write_json
+    write_predictions(predictions_path, test_ids, y_true, y_pred, dataset_id=dataset_id)
+    write_json(output_dir / "test_metrics.json", {**asdict(test), "selection_metric_version": "object_weighted_huber_v2", "selected_epoch": checkpoint["epoch"]})
+    write_json(output_dir / "history.json", history)
     print(f"Test: {test}")
     print(f"Saved test predictions: {predictions_path}")
     return test
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train the GPU-oriented 1-D ViT-style spectral transformer.")
     parser.add_argument("--data", type=Path, default=PROJECT_ROOT / "data" / "sdss_dr12_processed_flux_benchmark.npz")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "results_and_evaluations" / "spectral_transformer")
@@ -326,7 +344,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--allow-cpu", action="store_true", help="Debug only: CPU training is impractically slow.")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":

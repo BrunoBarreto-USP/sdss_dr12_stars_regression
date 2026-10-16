@@ -1,0 +1,8 @@
+{
+  "repo_id": "BrunoBarreto/sdss_dr12_stars_regression",
+  "repo_type": "model",
+  "release": "paper-v1",
+  "revision": "3a7b0b12020f577c49d806cd930979f3d5117c27",
+  "manifest_sha256": "327579006124005a26104a218e33a29319f41fe68a6c4e99627db732ea80ebc2",
+  "publication_status": "published_verified"
+}
