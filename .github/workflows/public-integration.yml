@@ -1,0 +1,27 @@
+name: Public data and reference integration
+on:
+  workflow_dispatch:
+    inputs:
+      reproduce_reference:
+        description: Download the substantial frozen paper release and full data
+        type: boolean
+        default: false
+jobs:
+  public:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HF_HUB_DISABLE_IMPLICIT_TOKEN: '1'
+      TF_CPP_MIN_LOG_LEVEL: '3'
+      TF_ENABLE_ONEDNN_OPTS: '0'
+      MPLBACKEND: Agg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m stellar_workflow smoke --online --run-dir outputs/public --n-boot 16
+      - if: ${{ inputs.reproduce_reference }}
+        run: python -m stellar_workflow reproduce-paper --run-dir outputs/reference/paper-v1

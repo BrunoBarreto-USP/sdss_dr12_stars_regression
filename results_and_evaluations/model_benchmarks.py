@@ -54,7 +54,7 @@ def _unscale(y_scaled: np.ndarray, target_scalers: Sequence) -> np.ndarray:
     """Inverse-transform ``(N, n_targets)`` scaled targets to physical space."""
     y = np.empty_like(y_scaled, dtype=np.float64)
     for idx, scaler in enumerate(target_scalers):
-        y[:, idx] = scaler.inverse_transform(y_scaled[:, idx].reshape(-1, 1)).ravel()
+        y[:, idx] = scaler.inverse_transform(y_scaled[:, idx].astype(np.float64).reshape(-1, 1)).ravel()
     return y
 
 
@@ -384,6 +384,8 @@ def _train_fabbro_cnn(
     batch_size: int,
     model_output_dir: Path | None = None,
 ) -> dict[str, object]:
+    if model_output_dir is not None and (model_output_dir / "fabbro_cnn.keras").exists():
+        raise FileExistsError("Preserve existing CNN checkpoint; select a fresh output directory.")
     model = _build_fabbro_cnn(X_train.shape[1])
     with tempfile.TemporaryDirectory(prefix="benchmark_cnn_") as tmpdir:
         weights_path = os.path.join(tmpdir, "best.weights.h5")
@@ -402,6 +404,7 @@ def _train_fabbro_cnn(
         fit_time = time.perf_counter() - t0
         model.load_weights(weights_path)
         if model_output_dir is not None:
+            pd.DataFrame(model.history.history).to_csv(model_output_dir / "fabbro_cnn_history.csv", index_label="epoch")
             model.save(model_output_dir / "fabbro_cnn.keras")
 
         predictions = np.asarray(
@@ -436,6 +439,8 @@ def _train_li_dnn_ensemble(
     weight_decay: float,
     model_output_dir: Path | None = None,
 ) -> dict[str, object]:
+    if model_output_dir is not None and any(model_output_dir.glob("li_dnn_*.keras")):
+        raise FileExistsError("Preserve existing DNN checkpoints; select a fresh output directory.")
     predictions_scaled = np.empty_like(y_test, dtype=np.float32)
     total_params = 0
     actual_pretrain_epochs = max(1, min(_LI_AE_MAX_EPOCHS, pretrain_epochs))
@@ -470,6 +475,7 @@ def _train_li_dnn_ensemble(
             )
             model.load_weights(weights_path)
         if model_output_dir is not None:
+            pd.DataFrame(model.history.history).to_csv(model_output_dir / f"li_dnn_{target_key}_history.csv", index_label="epoch")
             model.save(model_output_dir / f"li_dnn_{target_key.removesuffix('_output')}.keras")
         target_idx = _TARGET_KEY_TO_INDEX[target_key]
         predictions_scaled[:, target_idx] = model.predict(

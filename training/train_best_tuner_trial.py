@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from pathlib import Path
 
@@ -33,12 +34,12 @@ from training.training import (
 
 
 DEFAULT_DATA = PROJECT_ROOT / "data" / "sdss_dr12_processed_flux_benchmark.npz"
-DEFAULT_TUNER_PROJECT = PROJECT_ROOT / "results_and_evaluations" / "keras_tuner" / "stellar_baseline_orchestration"
+DEFAULT_TUNER_PROJECT = PROJECT_ROOT / "reference" / "tuning_history.json"
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "best_tuner_trial_100epochs.keras"
 DEFAULT_WEIGHTS = PROJECT_ROOT / "models" / "best_tuner_trial_100epochs.weights.h5"
 DEFAULT_RESULTS = PROJECT_ROOT / "results_and_evaluations" / "best_tuner_trial_100epochs_metrics.json"
 TARGET_KEYS = ("teff_output", "feh_output", "logg_output")
-TARGET_LABELS = ("Teff", "FeH", "logg")
+TARGET_LABELS = ("Teff", "[Fe/H]", "log g")
 
 
 class FixedTrialHP:
@@ -67,17 +68,16 @@ class FixedTrialHP:
 
 
 def _load_best_trial(tuner_project_dir: Path) -> tuple[str, float, dict[str, object]]:
+    from stellar_workflow.config import load_tuning_history
     best: tuple[str, float, dict[str, object]] | None = None
-    for trial_path in sorted(tuner_project_dir.glob("trial_*/trial.json")):
-        with trial_path.open("r", encoding="utf-8") as fh:
-            trial = json.load(fh)
+    for trial in load_tuning_history(tuner_project_dir):
         if trial.get("status") != "COMPLETED":
             continue
         score = trial.get("score")
         values = trial.get("hyperparameters", {}).get("values")
         if score is None or values is None:
             continue
-        item = (trial_path.parent.name, float(score), values)
+        item = (trial["trial_id"], float(score), values)
         if best is None or item[1] < best[1]:
             best = item
     if best is None:
@@ -95,15 +95,14 @@ def _stack_predictions(predictions) -> np.ndarray:
     return np.asarray(predictions)
 
 
-def _physical_mae(model: tf.keras.Model, x: np.ndarray, y_scaled: np.ndarray, data, *, batch_size: int) -> dict[str, float]:
+def _physical_mae(model: tf.keras.Model, x: np.ndarray, y_scaled: np.ndarray, data, *, batch_size: int, true_targets: np.ndarray) -> dict[str, float]:
     pred_scaled = _stack_predictions(model.predict(x, batch_size=batch_size, verbose=0))
     centers = np.asarray(data["label_robust_center"], dtype=np.float64)
     scales = np.asarray(data["label_robust_scale"], dtype=np.float64)
     pred = _inverse(pred_scaled, centers, scales)
-    if "y_test_targets_original" in data.files and y_scaled.shape[0] == data["y_test_targets_original"].shape[0]:
-        true = np.asarray(data["y_test_targets_original"], dtype=np.float64)
-    else:
-        true = _inverse(y_scaled, centers, scales)
+    true = np.asarray(true_targets, dtype=np.float64)
+    if true.shape != pred.shape:
+        raise ValueError("Explicit reference labels do not match predictions.")
     return {
         name: float(np.mean(np.abs(pred[:, idx] - true[:, idx])))
         for idx, name in enumerate(TARGET_LABELS)
@@ -114,6 +113,9 @@ def train_best_trial(args: argparse.Namespace) -> dict[str, object]:
     existing=[Path(path) for path in (args.model,args.weights,args.results) if Path(path).exists()]
     if existing:
         raise FileExistsError(f'Preserve existing experiment files; select fresh output paths: {existing}')
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    tf.keras.utils.set_random_seed(args.seed)
     if args.cpu:
         runtime = configure_cpu_runtime()
     else:
@@ -187,8 +189,9 @@ def train_best_trial(args: argparse.Namespace) -> dict[str, object]:
         target_standard_deviations=target_standard_deviations,
         target_keys=TARGET_KEYS,
     )
-    val_mae = _physical_mae(model, x_val, y_val, data, batch_size=args.batch_size)
-    test_mae = _physical_mae(model, x_test, y_test, data, batch_size=args.batch_size)
+    from stellar_workflow.predictions import physical_labels
+    val_mae = _physical_mae(model, x_val, y_val, data, batch_size=args.batch_size, true_targets=physical_labels(data, "val"))
+    test_mae = _physical_mae(model, x_test, y_test, data, batch_size=args.batch_size, true_targets=physical_labels(data, "test"))
 
     args.model.parent.mkdir(parents=True, exist_ok=True)
     build_export_model(model).save(args.model)

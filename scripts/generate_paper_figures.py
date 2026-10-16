@@ -69,16 +69,21 @@ def configure_style():
             "figure.constrained_layout.h_pad": 0.09,
         }
     )
-    return font
+    return {"family": "STIXGeneral", "file": Path(font).name, "sha256": digest(font)}
 
 
 class Figures:
-    def __init__(self, root, out, paper, run_dir=None):
+    def __init__(self, root, out, paper, run_dir=None, *, data_dir=None, strict_paper=False, dpi=600):
         self.root, self.out, self.paper = root, out, paper
         self.run = run_dir or out / "corrected_best_trial"
+        self.data = Path(data_dir or root / "data")
+        self.strict_paper = strict_paper
+        self.dpi = dpi
         out.mkdir(parents=True, exist_ok=True)
         self.manifest = {
-            "project_root": str(root),
+            "generator": "stellar_workflow",
+            "strict_paper_reference": strict_paper,
+            "png_dpi": dpi,
             "width_mm": 166,
             "font": configure_style(),
             "figures": {},
@@ -89,7 +94,7 @@ class Figures:
     def save(self, name, fig, **details):
         fig.canvas.draw()
         for suffix in ("pdf", "png"):
-            fig.savefig(self.out / f"{name}.{suffix}", dpi=600)
+            fig.savefig(self.out / f"{name}.{suffix}", dpi=self.dpi)
         self.manifest["figures"][name] = {
             "width_mm": round(fig.get_figwidth() * 25.4, 2),
             "height_mm": round(fig.get_figheight() * 25.4, 2),
@@ -121,12 +126,13 @@ class Figures:
         ]
         self.frames = {
             s: pq.read_table(
-                self.root / "data" / f"{s}.parquet", columns=columns
+                self.data / f"{s}.parquet", columns=columns
             ).to_pandas()
             for s in SPLITS
         }
         counts = {s: len(f) for s, f in self.frames.items()}
-        assert counts == dict(zip(SPLITS, (29422, 4846, 14443))), counts
+        if self.strict_paper:
+            assert counts == dict(zip(SPLITS, (29422, 4846, 14443))), counts
         self.all = pd.concat(self.frames.values(), ignore_index=True)
         assert self.all.spec_id.nunique() == len(self.all), (
             "Overlapping spectrum identifiers"
@@ -149,15 +155,18 @@ class Figures:
         unit = np.column_stack(
             (np.cos(dr) * np.cos(ar), np.cos(dr) * np.sin(ar), np.sin(dr))
         )
-        distance = cKDTree(unit).query(unit, k=33, workers=2)[0][:, -1]
+        neighbours = min(32, len(unit) - 1)
+        if neighbours < 1:
+            raise ValueError("Sky-density plotting requires at least two finite coordinates.")
+        distance = cKDTree(unit).query(unit, k=neighbours + 1, workers=2)[0][:, -1]
         # The spherical-cap solid angle equals pi times squared chord distance.
-        density = 32 / (np.pi * np.maximum(distance, 1e-12) ** 2)
+        density = neighbours / (np.pi * np.maximum(distance, 1e-12) ** 2)
         relative = density / density.max()
         longitude = -((ar + np.pi) % (2 * np.pi) - np.pi)
         order = np.argsort(relative)
         fig = plt.figure(figsize=(WIDTH, 83 / 25.4), layout="constrained")
         ax = fig.add_subplot(projection="aitoff")
-        norm = colors.LogNorm(vmin=float(relative.min()), vmax=1)
+        norm = colors.LogNorm(vmin=min(float(relative.min()), .999999), vmax=1)
         point_alpha = 0.35
         ax.scatter(
             longitude[order],
@@ -294,7 +303,7 @@ class Figures:
             for split in SPLITS:
                 offset = 0
                 for batch in pq.ParquetFile(
-                    self.root / "data" / f"{split}.parquet"
+                    self.data / f"{split}.parquet"
                 ).iter_batches(
                     batch_size=256,
                     columns=["spec_id", "flux", "loglam", "processed_flux", "rv_adop"],
@@ -310,7 +319,7 @@ class Figures:
                         )
                         minimum = min(minimum, float(np.min(loglam)))
                         maximum = max(maximum, float(np.max(loglam)))
-                        if split == "train" and offset + local == 123:
+                        if split == "train" and offset + local == min(123, len(self.frames["train"]) - 1):
                             selected = {
                                 "raw_flux": flux,
                                 "raw_loglam": loglam,
@@ -372,13 +381,9 @@ class Figures:
         )
 
     def optimization(self):
-        folder = (
-            self.root
-            / "results_and_evaluations/keras_tuner/stellar_baseline_orchestration"
-        )
-        trials = [
-            json.loads(p.read_text()) for p in sorted(folder.glob("trial_*/trial.json"))
-        ]
+        from stellar_workflow.config import load_tuning_history
+        source = self.run / "tuning_history.json"
+        trials = load_tuning_history(source if source.exists() else None)
         complete = [
             t for t in trials if t["status"] == "COMPLETED" and t["score"] is not None
         ]
@@ -400,7 +405,7 @@ class Figures:
         ax.plot(numbers, best, "--", color="black", linewidth=0.9, label="Best so far")
         ax.set_xlabel("Trial")
         ax.set_ylabel("Normalized validation MAE score")
-        ax.set_xlim(1, len(scores))
+        ax.set_xlim(.5, 1.5) if len(scores) == 1 else ax.set_xlim(1, len(scores))
         ax.grid(True)
         ax.legend(frameon=False)
         winning = complete[int(np.argmin(scores))]
@@ -430,7 +435,7 @@ class Figures:
                     )
                 )
                 kernel_name = next(
-                    name for name, shape in datasets if tuple(shape) == (4000, 128)
+                    name for name, shape in datasets if len(shape) == 2 and shape[0] == 4000
                 )
                 w = h5[kernel_name][()]
                 count = sum(int(np.prod(shape)) for _, shape in datasets)
@@ -441,12 +446,13 @@ class Figures:
             if l["class_name"] == "Dense"
         ]
         self.manifest["evaluated_model"] = {
-            "path": str(path),
+            "path": path.name,
             "sha256": digest(path),
             "trainable_parameters": count,
             "dense_layers": dense,
         }
-        assert count == 530275, count
+        if self.strict_paper:
+            assert count == 530275, count
         importance = np.linalg.norm(w, axis=1)
         importance /= importance.max()
         fig = plt.figure(figsize=(WIDTH, 101 / 25.4), layout="constrained")
@@ -577,7 +583,9 @@ class Figures:
         true = z["y_true"]
         pred = z["y_pred"]
         frame = self.frames["test"].set_index("spec_id").loc[ids]
-        assert len(np.unique(ids)) == 14443 and len(frame) == 14443
+        assert len(np.unique(ids)) == len(ids) and len(frame) == len(ids)
+        if self.strict_paper:
+            assert len(ids) == 14443
         np.testing.assert_allclose(
             frame[list(TARGETS)].to_numpy(), true, atol=0.001, rtol=1e-6
         )
@@ -589,7 +597,7 @@ class Figures:
             100 * mae / np.ptp(true, axis=0)
         ).tolist()
         self.manifest["sources"]["test_predictions"] = {
-            "path": str(path),
+            "path": path.name,
             "sha256": digest(path),
         }
         fig = plt.figure(
@@ -668,6 +676,8 @@ class Figures:
         self.manifest["snr_statistics"] = statistics
 
     def residual_diagram(self):
+        config = json.loads((self.run / "run_config.json").read_text())
+        hp = config["hyperparameters"]
         fig, axes = self.axes(rows=2, height=78)
         for index, ax in enumerate(axes):
             ax.set_xlim(0, 10.3)
@@ -676,7 +686,7 @@ class Figures:
             ax.set_title(
                 (
                     "(a) Identity shortcut: equal widths",
-                    "(b) Projected shortcut: 128 to 32 units",
+                    f"(b) Projected shortcut: {hp['initial_units']} to {hp['block_units']} units",
                 )[index],
                 loc="left",
                 pad=2,
@@ -757,13 +767,21 @@ class Figures:
                 xytext=(8.55, 0.9),
                 arrowprops={"arrowstyle": "->", "lw": 0.65},
             )
-        self.save("residual_block_single_column", fig, selected_dropout=0.0)
+        self.save("residual_block_single_column", fig, selected_dropout=hp["trunk_dropout"])
 
     def model_diagram(self):
         """Draw the selected model using widths read from its saved Keras graph."""
         path = self.run / "retrained_paper_model.keras"
         model_sha256 = digest(path)
-        audit = json.loads((self.run / "architecture_audit.json").read_text())
+        audit_path = self.run / "architecture_audit.json"
+        if not audit_path.exists():
+            audit_path = self.run / "reports/architecture_audit.json"
+        if audit_path.exists():
+            audit = json.loads(audit_path.read_text())
+        else:
+            config = json.loads((self.run / "run_config.json").read_text())
+            audit = {"model_sha256": config["model_sha256"], "trainable_parameters": config["trainable_parameters"],
+                     "actual_heads": config["heads"]}
         assert model_sha256 == audit["model_sha256"]
         with zipfile.ZipFile(path) as archive:
             graph = json.loads(archive.read("config.json"))["config"]["layers"]
@@ -776,8 +794,10 @@ class Figures:
         shared_width = layers["trunk_final_ln"]["inbound_nodes"][0]["args"][0][
             "config"
         ]["shape"][-1]
-        assert sum(layer["class_name"] == "Add" for layer in graph) == 1
-        assert not any(layer["class_name"] == "Dropout" for layer in graph)
+        block_count = sum(layer["class_name"] == "Add" for layer in graph)
+        dropout = max([layer["config"]["rate"] for layer in graph if layer["class_name"] == "Dropout"] or [0.])
+        if self.strict_paper:
+            assert block_count == 1 and dropout == 0.
         heads = {}
         tasks = (
             ("teff_output", "Teff", r"$T_{\mathrm{eff}}$", 50),
@@ -853,7 +873,7 @@ class Figures:
         box(0, 17, 31, f"Spectrum\n{input_width} bins")
         box(21, 23, 31, f"Stem\nDense {stem_width}\nLN → GELU")
         box(
-            48, 26, 31, f"Residual block\n{stem_width} → {shared_width}\nProjected skip"
+            48, 26, 31, f"{'Residual block' if block_count == 1 else str(block_count) + ' residual blocks'}\n{stem_width} → {shared_width}\nProjected skip"
         )
         box(78, 12, 31, f"LN\n{shared_width}")
         for left, right in ((17, 21), (44, 48), (74, 78)):
@@ -871,7 +891,7 @@ class Figures:
         ax.text(
             80.5,
             -1,
-            f"{audit['trainable_parameters']:,} trainable parameters; dropout = 0",
+            f"{audit['trainable_parameters']:,} trainable parameters; {'dropout = 0' if dropout == 0 else 'maximum dropout = ' + str(dropout)}",
             ha="center",
             va="center",
             fontsize=7.8,
@@ -882,12 +902,12 @@ class Figures:
             model_sha256=model_sha256,
             input_features=input_width,
             stem_units=stem_width,
-            residual_blocks=1,
+            residual_blocks=block_count,
             residual_units=shared_width,
             heads=heads,
             output_units_per_head=1,
             output_activation="linear",
-            selected_dropout=0.0,
+            selected_dropout=dropout,
             trainable_parameters=audit["trainable_parameters"],
             source="Layer widths and activations read from the evaluated saved Keras graph",
         )
@@ -931,14 +951,14 @@ class Figures:
             ax.set_title(title)
             ax.grid(True)
             ax.set_xlabel("Epoch" if j >= 2 else "")
-            ax.set_xlim(1, epochs.max())
+            ax.set_xlim((.5, 1.5) if len(epochs) == 1 else (1, epochs.max()))
         axes[0, 0].legend(frameon=False, fontsize=7.3)
         self.save(
             "training_validation_single_column",
             fig,
             epochs=len(frame),
             selected_epoch=int(epochs[selected]),
-            scope="Final training of the Bayesian-selected 530275-parameter architecture; same validation-selected checkpoint as all reported test metrics",
+            scope=f"Final training of the selected {config['trainable_parameters']}-parameter architecture; same validation-selected checkpoint as all reported test metrics",
             retraining_test_mae=config.get("test_mae"),
         )
         self.manifest["notes"] = [
@@ -1018,46 +1038,11 @@ class Figures:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--project-root", type=Path, default=ROOT)
-    parser.add_argument("--out-dir", type=Path)
-    parser.add_argument("--paper-dir", type=Path)
-    parser.add_argument(
-        "--run-dir",
-        type=Path,
-        help="One experiment supplying weights, predictions and complete training history.",
-    )
-    parser.add_argument("--only-training", action="store_true")
-    args = parser.parse_args()
-    out = args.out_dir or args.project_root / "outputs/paper_figures/single_column"
-    figures = Figures(args.project_root, out, args.paper_dir, args.run_dir)
-    if args.only_training:
-        previous = out / "manifest.json"
-        if previous.exists():
-            figures.manifest = json.loads(previous.read_text(encoding="utf-8"))
-        if figures.manifest.get("evaluated_model", {}).get("sha256") != digest(
-            figures.run / "retrained_paper_model.keras"
-        ):
-            raise ValueError(
-                "The evaluated checkpoint changed; regenerate every figure without --only-training."
-            )
-        figures.training()
-    else:
-        figures.load_metadata()
-        figures.sky()
-        figures.observations()
-        figures.distributions()
-        figures.raw_diagnostics()
-        figures.optimization()
-        figures.weights()
-        figures.predictions()
-        figures.residual_diagram()
-        figures.model_diagram()
-        figures.training()
-        from analyze_parameter_ranges import analyze
-
-        analyze(figures)
-    figures.finish()
+    import sys
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from stellar_workflow.compat import legacy_main
+    return legacy_main("figures")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,10 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from generate_paper_figures import Figures, TARGETS, digest
+import sys
+if str(Path(__file__).resolve().parents[1]) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.generate_paper_figures import Figures, TARGETS, digest
 
 ROOT = Path(__file__).resolve().parents[1]
 LABELS = ("Teff", "[Fe/H]", "log g")
@@ -136,7 +139,7 @@ def plot(figures, frame, *, n_boot, seed):
             linewidth=0.4,
         )
         count.set_yscale("log")
-        count.set_ylim(10, 15000)
+        count.set_ylim((.5, max(2, float(data.n.max()) * 2)) if data.n.max() < 10 else (10, 15000))
         count.set_ylabel("Test objects", fontsize=8)
         count.set_xlabel(f"Reference {title} ({unit})", fontsize=8)
         count.tick_params(labelsize=7.5)
@@ -193,32 +196,11 @@ def analyze(figures, *, n_boot=10000, seed=42):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--run-dir",
-        type=Path,
-        default=ROOT / "outputs/paper_figures/single_column/corrected_best_trial",
-    )
-    parser.add_argument(
-        "--out-dir", type=Path, default=ROOT / "outputs/paper_figures/single_column"
-    )
-    parser.add_argument("--paper-dir", type=Path)
-    parser.add_argument("--n-boot", type=int, default=10000)
-    parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
-    figures = Figures(ROOT, args.out_dir, args.paper_dir, args.run_dir)
-    figures.manifest = json.loads(
-        (args.out_dir / "manifest.json").read_text(encoding="utf-8")
-    )
-    if figures.manifest["evaluated_model"]["sha256"] != digest(
-        args.run_dir / "retrained_paper_model.keras"
-    ):
-        raise ValueError(
-            "The parameter diagnostics and article must use the same model."
-        )
-    frame = analyze(figures, n_boot=args.n_boot, seed=args.seed)
-    figures.finish()
-    print(frame.to_string(index=False), flush=True)
+    import sys
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from stellar_workflow.compat import legacy_main
+    return legacy_main("figures")
 
 
 if __name__ == "__main__":

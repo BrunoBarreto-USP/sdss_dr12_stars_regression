@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterable
+import time
 
 import numpy as np
 import pandas as pd
-from huggingface_hub import hf_hub_download
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -52,22 +52,13 @@ def split_filename(split: str) -> str:
     return SPLIT_FILES[str(split).lower()]
 
 
-def ensure_parquet_split(split: str, data_dir: str | Path = DEFAULT_DATA_DIR) -> Path:
+def ensure_parquet_split(split: str, data_dir: str | Path = DEFAULT_DATA_DIR, *, offline: bool = False) -> Path:
     """Download/cache a split Parquet file and return its local path."""
     split_name = normalize_split_name(split)
     local_path = Path(data_dir) / split_filename(split_name)
-    if local_path.exists():
-        return local_path
-
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-    cached = hf_hub_download(
-        repo_id=HF_DATASET_REPO,
-        repo_type="dataset",
-        filename=split_filename(split_name),
-        local_dir=local_path.parent,
-        local_dir_use_symlinks=False,
-    )
-    return Path(cached)
+    from stellar_workflow.datasets import REFERENCE, download_verified
+    url = f"https://huggingface.co/datasets/{HF_DATASET_REPO}/resolve/{REFERENCE['revision']}/{local_path.name}"
+    return download_verified(url, local_path, REFERENCE["splits"][split_name]["sha256"], offline=offline)
 
 
 def ensure_all_parquet_splits(data_dir: str | Path = DEFAULT_DATA_DIR) -> dict[str, Path]:
@@ -79,14 +70,19 @@ def _read_parquet(path: Path, columns: Iterable[str] | None, row_limit: int | No
     if row_limit is None:
         return pd.read_parquet(path, columns=list(columns) if columns is not None else None)
 
-    try:
-        import pyarrow.parquet as pq
-
-        table = pq.read_table(path, columns=list(columns) if columns is not None else None)
-        return table.slice(0, int(row_limit)).to_pandas()
-    except Exception:
-        frame = pd.read_parquet(path, columns=list(columns) if columns is not None else None)
-        return frame.head(int(row_limit)).copy()
+    import pyarrow.parquet as pq
+    if row_limit < 1:
+        raise ValueError("row_limit must be positive.")
+    # Read just the requested rows, including for local multi-GB Parquet files.
+    batches, remaining = [], int(row_limit)
+    for batch in pq.ParquetFile(path).iter_batches(batch_size=min(256, remaining),
+            columns=list(columns) if columns is not None else None, use_threads=False):
+        selected = batch.slice(0, remaining)
+        batches.append(selected.to_pandas())
+        remaining -= selected.num_rows
+        if not remaining:
+            break
+    return pd.concat(batches, ignore_index=True) if batches else pd.DataFrame(columns=columns)
 
 
 def load_split_dataframe(
@@ -98,26 +94,29 @@ def load_split_dataframe(
 ) -> pd.DataFrame:
     """Load a dataset split as a pandas DataFrame."""
     split_name = normalize_split_name(split)
+    if row_limit is not None and row_limit < 1:
+        raise ValueError("row_limit must be positive.")
     local_path = Path(data_dir) / split_filename(split_name)
     if local_path.exists():
         frame = _read_parquet(local_path, columns=columns, row_limit=row_limit)
     elif row_limit is not None:
-        try:
-            from datasets import load_dataset
-
-            stream = load_dataset(HF_DATASET_REPO, split=split_name, streaming=True)
-            rows = []
-            selected_columns = list(columns) if columns is not None else None
-            for row_idx, row in enumerate(stream):
-                if row_idx >= int(row_limit):
-                    break
-                if selected_columns is not None:
-                    row = {column: row[column] for column in selected_columns}
-                rows.append(row)
-            frame = pd.DataFrame(rows)
-        except Exception:
-            path = ensure_parquet_split(split_name, data_dir=data_dir)
-            frame = _read_parquet(path, columns=columns, row_limit=row_limit)
+        from datasets import load_dataset
+        from stellar_workflow.datasets import REFERENCE
+        from itertools import islice
+        selected_columns = list(columns) if columns is not None else None
+        for attempt in range(3):
+            try:
+                stream = load_dataset(HF_DATASET_REPO, revision=REFERENCE["revision"], split=split_name, streaming=True, token=False)
+                rows = [({column: row[column] for column in selected_columns} if selected_columns else row)
+                        for row in islice(stream, int(row_limit))]
+                frame = pd.DataFrame(rows)
+                break
+            except KeyError:
+                raise
+            except Exception as error:
+                if attempt == 2:
+                    raise RuntimeError("Public sample streaming failed after 3 attempts; retry, or explicitly run prepare-data for the verified full HTTP download.") from error
+                time.sleep(2 ** attempt)
     else:
         path = ensure_parquet_split(split_name, data_dir=data_dir)
         frame = _read_parquet(path, columns=columns, row_limit=row_limit)
