@@ -1,4 +1,4 @@
-# Multi-Variable Stellar Parameter Estimation Using Residual Multitask Neural Networks
+# Compact Residual Multitask Neural Networks for Stellar Parameter Estimation
 
 This repository reproduces the workflow used in the paper by Bruno Santos Meneses Barreto and Marcio Eisencraft for estimating `Teff`, `[Fe/H]`, and `log g` from SDSS DR12 stellar spectra with a compact residual multitask MLP.
 
@@ -14,32 +14,65 @@ The code covers the full pipeline:
 An optional GPU-only PyTorch spectral Transformer is also provided for a
 larger attention-based comparison. It is not part of the default notebook run.
 
-## Paper Workflow
+## Current article experiment
 
-The notebook follows the same sequence described in the paper:
+The active experiment uses the object-deduplicated local splits: **29,422 training, 4,846
+validation and 14,443 test spectra**. Inputs contain 4000 wavelength pixels. Target scalers
+are fitted on training labels only. Two fixed noisy copies increase the training inputs to
+88,266; these Gaussian perturbations are regularization, with labels unchanged.
 
-1. load the SDSS DR12 benchmark split (`30k` train, `5k` validation, `15k` test),
-2. use the released 4000-point processed spectral representation,
-3. build a compact NPZ and scale targets with `RobustScaler`,
-4. optionally compare against `OLS`, `Ridge`, a StarNet-style CNN, and a Li-style DNN,
-5. tune and train the residual multitask neural network,
-6. run the residual, layer-normalization, and multitask ablations,
-7. report scatter plots, MAE, and SNR-binned error statistics.
+The architecture is exactly the best saved Bayesian trial, `trial_099`: a 128-unit stem,
+one 32-unit residual block, a `Teff=(16,)` head and `[Fe/H]=(48,32,16)` and
+`log g=(48,32,16)` heads. It has **530,275 trainable parameters**. An 80-epoch run with seed 42
+selected epoch 74 by normalized validation MAE. Curves, weights, predictions, bootstrap intervals
+and the article tables all use that same checkpoint.
 
-The paper-model metrics reported for this workflow are approximately:
+| Target | Test MAE | Individual bootstrap 95% interval |
+| --- | ---: | ---: |
+| Teff | 58.717678 K | 57.433322–60.075142 K |
+| [Fe/H] | 0.101314 dex | 0.099023–0.103645 dex |
+| log g | 0.131862 dex | 0.128282–0.135533 dex |
 
-- `Teff` MAE: `59.5 K`
-- `[Fe/H]` MAE: `0.101 dex`
-- `log g` MAE: `0.130 dex`
-- trainable parameters: `542,771`
+The model requires approximately 1.064 million forward-pass FLOPs per spectrum, excluding
+preprocessing. It uses about 96% fewer parameters and estimated FLOPs than the three-network
+Li-style DNN, while reducing temperature MAE by 1.59 K. Performance is not uniform across the
+retained ranges: the parameter-bin diagnostics explicitly report errors, signed bias and counts.
+
+Bootstrap reports use 10,000 resamples of the same test objects. Paired intervals compare fixed
+checkpoints and do not measure training-seed variation. Earlier experiments remain preserved and
+are not the source of the current article's metrics.
 
 The CNN and Li-style DNN are controlled comparison baselines: they use the
 same compact processed spectra, split, and optional augmentation as the paper
 model. They are not exact reproductions of the original external papers.
 
-## Main Entry Point
+## Reproduce the current article
 
-Use [orchestration.ipynb](orchestration.ipynb) as the main entry point. It is the only README-guided workflow in this repository and is organized to mirror the paper sections.
+Use [scripts/README_single_column.md](scripts/README_single_column.md) for the active commands.
+The consistent experiment is stored in `outputs/paper_figures/single_column/corrected_best_trial/`.
+
+For a fresh training, choose a new output folder; existing histories are protected:
+
+```powershell
+python scripts/retrain_paper_with_history.py --out-dir outputs/paper_reproduction --epochs 80 --threads 6
+python scripts/finalize_corrected_experiment.py --run-dir outputs/paper_reproduction
+python scripts/generate_paper_figures.py --run-dir outputs/paper_reproduction
+python scripts/analyze_parameter_ranges.py --run-dir outputs/paper_reproduction
+```
+
+The archived comparisons require their saved baseline predictions and the exact local dataset
+splits. The compact NPZ is checked against Parquet IDs, labels and training-only scaler values
+before use. Downloading an older public snapshot does not replace object deduplication.
+
+`orchestration.ipynb` remains available as the broader exploratory workflow. The commands above
+define the current article experiment; historical output names in the notebook refer to earlier runs.
+
+Run the regression checks and artifact audit with:
+
+```powershell
+python -m unittest discover -s tests -v
+python scripts/audit_research_pipeline.py
+```
 
 ## Repository Structure
 
@@ -67,7 +100,7 @@ Files are downloaded automatically into `data/` when required.
 
 ## Setup
 
-Python `3.10` or `3.11` is recommended.
+Python `3.11` is the locally verified interpreter. The audit records installed library versions.
 
 ```powershell
 python -m venv .venv
@@ -106,14 +139,14 @@ Running the notebook can create these local artifacts:
 
 - `data/train.parquet`, `data/validation.parquet`, `data/test.parquet`
 - `data/sdss_dr12_processed_flux_benchmark.npz`
-- `models/paper_hyperparams_model.keras`
-- `models/paper_hyperparams_best.weights.h5`
+- `outputs/paper_figures/single_column/corrected_best_trial/retrained_paper_model.keras`
+- `outputs/paper_figures/single_column/corrected_best_trial/best.weights.h5`
 - `models/benchmarks/fabbro_cnn.keras` and `models/benchmarks/li_dnn_*.keras`
-- `figs/paper_model_reference_vs_predicted.png`
-- `results_and_evaluations/paper_hyperparams_metrics.json`
-- `results_and_evaluations/paper_model_test_metrics.json`
-- `results_and_evaluations/paper_model_snr_error_stats.csv`
+- `outputs/paper_figures/single_column/*_single_column.pdf` and matching PNGs
+- `outputs/paper_figures/single_column/corrected_best_trial/run_config.json`
+- `outputs/paper_figures/single_column/corrected_best_trial/paired_bootstrap.json`
+- `outputs/paper_figures/single_column/corrected_best_trial/parameter_range_errors.csv`
 - `results_and_evaluations/classical_benchmark_results.csv`
-- `results_and_evaluations/paper_ablations/ablation_summary.csv`
+- `outputs/paper_figures/single_column/corrected_best_trial/ablations/ablation_summary.csv`
 
 These outputs are local working artifacts and should generally stay out of Git.

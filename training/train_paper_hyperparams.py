@@ -21,11 +21,10 @@ if str(PROJECT_ROOT) not in sys.path:
 from data_preprocessing.augmentation import augment_training_data, prepare_multitask_dicts
 from model_definitions.model_definitions import (
     DEFAULT_COSINE_ALPHA,
-    DEFAULT_HUBER_DELTA,
-    WARMUP_FRACTION,
-    WarmupCosineDecay,
     build_export_model,
+    build_model,
 )
+from training.train_best_tuner_trial import FixedTrialHP
 from training.training import (
     NORMALIZED_MAE_SUM_NAME,
     NormalizedMaeSumCallback,
@@ -33,7 +32,7 @@ from training.training import (
     _create_dataset,
     _score_from_eval_results,
     cast_target_dicts_to_float32,
-    compute_inverse_standard_deviation_loss_weights,
+    compute_inverse_variance_loss_weights,
     configure_cpu_runtime,
     configure_gpu_runtime,
 )
@@ -67,7 +66,7 @@ class FixedPaperHP:
         "shared_blocks": 1,
         "block_units": 32,
         "trunk_dropout": 0.0,
-        "teff_output_head_template": "(16)",
+        "teff_output_head_template": "(16,)",
         "teff_output_head_dropout": 0.0,
         "feh_output_head_template": "(48, 32, 16)",
         "feh_output_head_dropout": 0.0,
@@ -121,16 +120,6 @@ def _history_min(history: tf.keras.callbacks.History, key: str) -> float | None:
     return float(np.nanmin(values))
 
 
-def _dense_head(x, *, output_name: str, units: tuple[int, ...]):
-    for idx, width in enumerate(units):
-        x = tf.keras.layers.Dense(
-            width,
-            activation="gelu",
-            name=f"{output_name}_head_dense_{idx}",
-        )(x)
-    return tf.keras.layers.Dense(1, activation="linear", name=output_name, dtype="float32")(x)
-
-
 def build_paper_fixed_model(
     *,
     input_dim: int,
@@ -139,56 +128,24 @@ def build_paper_fixed_model(
     batch_size: int,
     jit_compile: bool,
 ) -> tf.keras.Model:
-    """Build the 542,771-parameter paper/no-gating architecture."""
-    hp = FixedPaperHP.values
-    inputs = tf.keras.layers.Input(shape=(input_dim,), name="stellar_input")
-
-    x = tf.keras.layers.Dense(hp["initial_units"], name="input_stem_dense")(inputs)
-    x = tf.keras.layers.LayerNormalization(name="input_stem_ln")(x)
-    x = tf.keras.layers.Activation("gelu", name="input_stem_activation")(x)
-
-    shortcut = x
-    x = tf.keras.layers.LayerNormalization(name="shared_block_0_ln_0")(x)
-    x = tf.keras.layers.Dense(hp["block_units"], name="shared_block_0_dense_0")(x)
-    x = tf.keras.layers.Activation("gelu", name="shared_block_0_activation_0")(x)
-    x = tf.keras.layers.LayerNormalization(name="shared_block_0_ln_1")(x)
-    x = tf.keras.layers.Dense(hp["block_units"], name="shared_block_0_dense_1")(x)
-    x = tf.keras.layers.Dropout(hp["trunk_dropout"], name="shared_block_0_dropout")(x)
-
-    shortcut = tf.keras.layers.LayerNormalization(name="shared_block_0_shortcut_ln")(shortcut)
-    shortcut = tf.keras.layers.Dense(hp["block_units"], name="shared_block_0_shortcut_dense")(shortcut)
-    x = tf.keras.layers.Add(name="shared_block_0_add")([x, shortcut])
-    shared = tf.keras.layers.LayerNormalization(name="trunk_final_ln")(x)
-
-    outputs = [
-        _dense_head(shared, output_name="teff_output", units=(48, 32)),
-        _dense_head(shared, output_name="feh_output", units=(16,)),
-        _dense_head(shared, output_name="logg_output", units=(48,)),
-    ]
-    model = tf.keras.Model(inputs=inputs, outputs=outputs, name="stellar_model")
-
-    warmup_steps = int(total_steps * WARMUP_FRACTION)
-    learning_rate = WarmupCosineDecay(
-        hp["learning_rate"] * (batch_size / 256) ** 0.5,
-        total_steps=total_steps,
-        warmup_steps=warmup_steps,
-        alpha=DEFAULT_COSINE_ALPHA,
-    )
-    model.compile(
-        optimizer=tf.keras.optimizers.AdamW(
-            learning_rate=learning_rate,
-            weight_decay=hp["weight_decay"],
-            global_clipnorm=5.0,
-        ),
-        loss={name: tf.keras.losses.Huber(delta=DEFAULT_HUBER_DELTA) for name in TARGET_KEYS},
+    """Build the declared trial configuration through the same builder as the tuner."""
+    return build_model(
+        input_shape=input_dim,
+        num_outputs=len(TARGET_KEYS),
+        hp=FixedTrialHP(FixedPaperHP.values),
         loss_weights=loss_weights,
-        metrics={name: [tf.keras.metrics.MeanAbsoluteError(name="mae")] for name in TARGET_KEYS},
+        total_steps=total_steps,
+        cosine_alpha=DEFAULT_COSINE_ALPHA,
+        use_lr_schedule=True,
         jit_compile=jit_compile,
+        batch_size=batch_size,
     )
-    return model
 
 
 def train_paper_model(args: argparse.Namespace) -> dict[str, object]:
+    existing=[Path(path) for path in (args.model,args.weights,args.results) if Path(path).exists()]
+    if existing:
+        raise FileExistsError(f'Preserve existing experiment files; select fresh output paths: {existing}')
     _set_seed(args.seed)
     if args.cpu:
         runtime = configure_cpu_runtime()
@@ -217,7 +174,7 @@ def train_paper_model(args: argparse.Namespace) -> dict[str, object]:
         )
 
     target_standard_deviations = _compute_target_standard_deviations(y_train_dict, TARGET_KEYS)
-    loss_weights = compute_inverse_standard_deviation_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
+    loss_weights = compute_inverse_variance_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
     total_steps = int(x_train.shape[0] // args.batch_size) * args.epochs
 
     print("Paper fixed hyperparameters:")

@@ -26,7 +26,7 @@ from training.training import (
     _create_dataset,
     _score_from_eval_results,
     cast_target_dicts_to_float32,
-    compute_inverse_standard_deviation_loss_weights,
+    compute_inverse_variance_loss_weights,
     configure_cpu_runtime,
     configure_gpu_runtime,
 )
@@ -111,6 +111,9 @@ def _physical_mae(model: tf.keras.Model, x: np.ndarray, y_scaled: np.ndarray, da
 
 
 def train_best_trial(args: argparse.Namespace) -> dict[str, object]:
+    existing=[Path(path) for path in (args.model,args.weights,args.results) if Path(path).exists()]
+    if existing:
+        raise FileExistsError(f'Preserve existing experiment files; select fresh output paths: {existing}')
     if args.cpu:
         runtime = configure_cpu_runtime()
     else:
@@ -143,7 +146,7 @@ def train_best_trial(args: argparse.Namespace) -> dict[str, object]:
         )
 
     target_standard_deviations = _compute_target_standard_deviations(y_train_dict, TARGET_KEYS)
-    loss_weights = compute_inverse_standard_deviation_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
+    loss_weights = compute_inverse_variance_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
     total_steps = int(x_train.shape[0] // args.batch_size) * args.epochs
 
     model = build_model(

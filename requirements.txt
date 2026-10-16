@@ -4,6 +4,8 @@ scipy
 matplotlib
 scikit-learn
 pyarrow
+astropy
+h5py
 tensorflow
 keras-tuner
 huggingface_hub

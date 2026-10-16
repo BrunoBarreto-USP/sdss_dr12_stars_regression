@@ -1,8 +1,7 @@
-"""Training helpers: runtime config, search, fit, and history plotting.
+"""Runtime setup, Bayesian search, fixed-budget fitting and history plotting.
 
-Supports an explicit Colab GPU path and an explicit local CPU-only path.
-On-the-fly augmentation (Gaussian noise + neighbour mixup + wavelength masking).
-EMA weights for stable validation. Optional augmentation ramp schedule.
+Training inputs already contain any offline augmentation. Validation and test
+sets stay separate; checkpoint selection uses the normalized validation MAE.
 """
 
 from __future__ import annotations
@@ -308,6 +307,20 @@ def compute_inverse_standard_deviation_loss_weights(
     return loss_weights
 
 
+def compute_inverse_variance_loss_weights(
+    y_train_dict_float32: dict[str, np.ndarray],
+    target_keys: Sequence[str] = DEFAULT_TARGET_KEYS,
+) -> dict[str, float]:
+    """Reproduce the paper's scaled-target variance weighting, summing to task count."""
+    standard_deviations = _compute_target_standard_deviations(y_train_dict_float32, target_keys)
+    scales = np.asarray([standard_deviations[key] for key in target_keys], dtype=np.float64)
+    if not np.isfinite(scales).all() or np.any(scales <= 0):
+        raise ValueError('Loss weighting requires finite, nonconstant training targets.')
+    inverse_variance = 1.0 / scales**2
+    values = len(target_keys) * inverse_variance / inverse_variance.sum()
+    return dict(zip(target_keys, values.tolist(), strict=True))
+
+
 # ---------------------------------------------------------------------------
 # Main training loop
 # ---------------------------------------------------------------------------
@@ -349,6 +362,9 @@ def tune_and_train(
     """
     if tuner_project_name is None:
         tuner_project_name = DEFAULT_TUNER_PROJECT_NAME
+    existing_outputs=[path for path in (model_checkpoint_path,final_model_path) if os.path.exists(path)]
+    if existing_outputs:
+        raise FileExistsError(f'Preserve saved models; select fresh checkpoint and export paths: {existing_outputs}')
     final_train_epochs = final_train_epochs if final_train_epochs is not None else search_epochs
 
     input_dim = X_train_features.shape[1]
@@ -358,7 +374,7 @@ def tune_and_train(
         y_train_dict_float32,
         target_keys,
     )
-    loss_weights = compute_inverse_standard_deviation_loss_weights(
+    loss_weights = compute_inverse_variance_loss_weights(
         y_train_dict_float32,
         target_keys=target_keys,
     )

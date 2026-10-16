@@ -62,7 +62,15 @@ def augment_training_data(
     """
     rng = np.random.default_rng(seed)
     X_train = np.asarray(X_train, dtype=np.float32)
+    if X_train.ndim != 2 or not len(X_train) or not np.isfinite(X_train).all():
+        raise ValueError('Training features must be a nonempty finite 2-D array.')
+    if not isinstance(aug_factor, (int, np.integer)) or aug_factor < 1:
+        raise ValueError('aug_factor must be a positive integer.')
+    if not np.isfinite(noise_level) or (aug_factor > 1 and noise_level < .01):
+        raise ValueError('Noisy copies require a finite noise_level of at least 0.01.')
     n = len(X_train)
+    if any(np.asarray(values).shape != (n,) or not np.isfinite(values).all() for values in y_train_dict.values()):
+        raise ValueError('Every target must be finite and have exactly one value per spectrum.')
 
     per_sample_std = X_train.std(axis=1, keepdims=True)              # (N, 1)
     X_parts = [X_train]

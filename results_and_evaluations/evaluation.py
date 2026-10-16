@@ -69,7 +69,7 @@ def _extract_sigma(raw_preds: list[np.ndarray]) -> np.ndarray | None:
     sigma_cols = []
     for p in raw_preds:
         if p.ndim > 1 and p.shape[-1] == 2:
-            var = np.log1p(np.exp(p[:, 1:2])) + 1e-6  # softplus
+            var = np.logaddexp(0.0, p[:, 1:2]) + 1e-6  # stable softplus
             sigma_cols.append(np.sqrt(var))
     if not sigma_cols:
         return None

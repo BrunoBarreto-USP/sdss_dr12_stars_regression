@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from data_acquisition.hf_data import CANONICAL_SPLITS, TARGET_COLUMNS, split_to_arrays
 from data_preprocessing.dataset import normalize_flux_per_spectrum
+from data_preprocessing.validation import validate_compact_dataset
 
 
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "sdss_dr12_processed_flux_benchmark.npz"
@@ -30,6 +31,10 @@ def build_final_dataset(
     """Create a processed-flux NPZ with scaled targets for model training."""
     output_path = Path(output_path)
     if output_path.exists() and not overwrite:
+        with np.load(output_path, allow_pickle=False) as cached:
+            validate_compact_dataset(cached, PROJECT_ROOT/'data', row_limit=row_limit)
+            if bool(cached['flux_normalized_per_spectrum']) != normalize_flux:
+                raise ValueError('Cached normalization setting differs; use a fresh output or explicit overwrite.')
         print(f"Compact NPZ already exists, skipping: {output_path.resolve()}")
         return output_path
 

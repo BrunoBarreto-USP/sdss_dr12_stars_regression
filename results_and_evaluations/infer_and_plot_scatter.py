@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from model_definitions.model_definitions import WarmupCosineDecay  # noqa: F401
+from results_and_evaluations.prediction_utils import prediction_matrix
 
 
 DEFAULT_DATA = PROJECT_ROOT / "data" / "sdss_dr12_processed_flux_benchmark.npz"
@@ -51,9 +52,7 @@ TARGETS = (
 
 
 def _stack_predictions(predictions) -> np.ndarray:
-    if isinstance(predictions, (list, tuple)):
-        return np.column_stack([np.asarray(pred).reshape(-1) for pred in predictions])
-    return np.asarray(predictions)
+    return prediction_matrix(predictions)
 
 
 def _inverse_scaled_targets(values: np.ndarray, centers: np.ndarray, scales: np.ndarray) -> np.ndarray:

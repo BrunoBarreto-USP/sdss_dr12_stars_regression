@@ -123,7 +123,7 @@ def load_split_dataframe(
         frame = _read_parquet(path, columns=columns, row_limit=row_limit)
     missing = [column for column in (columns or []) if column not in frame.columns]
     if missing:
-        raise KeyError(f"Missing columns in {path.name}: {missing}")
+        raise KeyError(f"Missing columns in {local_path.name}: {missing}")
     return frame
 
 

@@ -32,6 +32,8 @@ if sys.path and Path(sys.path[0]).resolve() == SCRIPT_DIR:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from finetuning.checkpoint_io import load_checkpoint
+
 
 @dataclass
 class Metrics:
@@ -166,7 +168,8 @@ def _evaluate(
     centers: np.ndarray,
     scales: np.ndarray,
     amp: bool,
-) -> Metrics:
+    return_arrays: bool = False,
+) -> Metrics | tuple[Metrics, np.ndarray, np.ndarray]:
     model.eval()
     losses: list[float] = []
     predictions: list[np.ndarray] = []
@@ -184,7 +187,10 @@ def _evaluate(
     prediction_physical = np.concatenate(predictions) * scales + centers
     target_physical = np.concatenate(targets) * scales + centers
     mae = np.abs(prediction_physical - target_physical).mean(axis=0)
-    return Metrics(float(np.mean(losses)), float(mae[0]), float(mae[1]), float(mae[2]))
+    metrics = Metrics(float(np.mean(losses)), float(mae[0]), float(mae[1]), float(mae[2]))
+    if return_arrays:
+        return metrics, target_physical, prediction_physical
+    return metrics
 
 
 def _make_loader(dataset: Dataset, batch_size: int, *, shuffle: bool, workers: int) -> DataLoader:
@@ -228,6 +234,7 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
         y_val = np.asarray(data["y_val_targets"], dtype=np.float32)
         x_test = np.asarray(data["X_test_features"], dtype=np.float32)
         y_test = np.asarray(data["y_test_targets"], dtype=np.float32)
+        test_ids = np.asarray(data["test_ids"], dtype=np.int64)
         centers = np.asarray(data["label_robust_center"], dtype=np.float64).reshape(1, -1)
         scales = np.asarray(data["label_robust_scale"], dtype=np.float64).reshape(1, -1)
 
@@ -270,13 +277,28 @@ def train_spectral_transformer(args: argparse.Namespace) -> Metrics:
         print(f"Validation: {validation}")
         if validation.loss < best_loss:
             best_loss = validation.loss
-            torch.save({"model": model.state_dict(), "args": vars(args), "validation": asdict(validation), "epoch": epoch}, output_dir / "best_model.pt")
+            saved_args = {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}
+            torch.save({"model": model.state_dict(), "args": saved_args, "validation": asdict(validation), "epoch": epoch}, output_dir / "best_model.pt")
 
-    checkpoint = torch.load(output_dir / "best_model.pt", map_location=device)
+    checkpoint = load_checkpoint(output_dir / "best_model.pt", map_location=device)
     model.load_state_dict(checkpoint["model"])
-    test = _evaluate(model, test_loader, device=device, weights=weights, centers=centers, scales=scales, amp=amp)
+    test, y_true, y_pred = _evaluate(
+        model, test_loader, device=device, weights=weights, centers=centers, scales=scales,
+        amp=amp, return_arrays=True,
+    )
+    if y_true.shape != (len(test_ids), 3) or y_pred.shape != y_true.shape:
+        raise ValueError("Test predictions are not aligned with test IDs.")
+    predictions_path = output_dir / "test_predictions.npz"
+    np.savez_compressed(
+        predictions_path,
+        test_ids=test_ids,
+        target_names=np.asarray(["Teff", "[Fe/H]", "log g"]),
+        y_true=y_true,
+        y_pred=y_pred,
+    )
     (output_dir / "test_metrics.json").write_text(json.dumps(asdict(test), indent=2), encoding="utf-8")
     print(f"Test: {test}")
+    print(f"Saved test predictions: {predictions_path}")
     return test
 
 

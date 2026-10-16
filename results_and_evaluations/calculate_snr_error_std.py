@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,9 @@ import pandas as pd
 import tensorflow as tf
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from results_and_evaluations.prediction_utils import prediction_matrix
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "stellar_regression_model.keras"
 DEFAULT_DATA = PROJECT_ROOT / "data" / "sdss_dr12_processed_flux_benchmark.npz"
 DEFAULT_SNR_DATA = PROJECT_ROOT / "data" / "test.parquet"
@@ -22,11 +26,7 @@ TARGETS = ("Teff", "FeH", "logg")
 
 
 def stack_predictions(predictions: object) -> np.ndarray:
-    if isinstance(predictions, (list, tuple)):
-        return np.column_stack(
-            [np.asarray(prediction).reshape(-1) for prediction in predictions]
-        )
-    return np.asarray(predictions)
+    return prediction_matrix(predictions)
 
 
 def load_prediction_scaler(

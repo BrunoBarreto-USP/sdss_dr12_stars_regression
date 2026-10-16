@@ -30,6 +30,7 @@ from data_preprocessing.augmentation import augment_training_data, prepare_multi
 from model_definitions.model_definitions import (
     DEFAULT_COSINE_ALPHA,
     DEFAULT_HUBER_DELTA,
+    TASK_HEAD_TEMPLATE_CHOICES,
     WARMUP_FRACTION,
     WarmupCosineDecay,
 )
@@ -40,7 +41,7 @@ from training.training import (
     _compute_target_standard_deviations,
     _create_dataset,
     cast_target_dicts_to_float32,
-    compute_inverse_standard_deviation_loss_weights,
+    compute_inverse_variance_loss_weights,
     configure_cpu_runtime,
     configure_gpu_runtime,
 )
@@ -143,11 +144,7 @@ def build_paper_ablation_model(
     if use_layernorm:
         x = tf.keras.layers.LayerNormalization(name="trunk_final_ln")(x)
 
-    head_units = {
-        "teff_output": (48, 32),
-        "feh_output": (16,),
-        "logg_output": (48,),
-    }
+    head_units = {name: TASK_HEAD_TEMPLATE_CHOICES[hp[f'{name}_head_template']] for name in TARGET_KEYS}
     selected_outputs = TARGET_KEYS if output_name is None else (output_name,)
     outputs = [_dense_head(x, output_name=name, units=head_units[name]) for name in selected_outputs]
 
@@ -326,6 +323,8 @@ def _train_no_multitask_variant(
 
 
 def run_paper_ablations(args: argparse.Namespace) -> pd.DataFrame:
+    if (args.output_dir/'ablation_summary.csv').exists():
+        raise FileExistsError(f'Preserve existing ablations; select a fresh output directory: {args.output_dir}')
     """Train requested ablations and save unscaled test metrics."""
     args.output_dir = Path(args.output_dir)
     variants = _parse_variants(args.variants)
@@ -357,7 +356,7 @@ def run_paper_ablations(args: argparse.Namespace) -> pd.DataFrame:
         )
     y_train_aug = np.column_stack([y_train_dict[name] for name in TARGET_KEYS])
     target_standard_deviations = _compute_target_standard_deviations(y_train_dict, TARGET_KEYS)
-    loss_weights = compute_inverse_standard_deviation_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
+    loss_weights = compute_inverse_variance_loss_weights(y_train_dict, target_keys=TARGET_KEYS)
     scalers = _target_scalers_from_npz(data)
 
     rows: list[dict[str, float | int | str]] = []
