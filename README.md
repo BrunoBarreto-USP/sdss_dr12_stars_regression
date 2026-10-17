@@ -26,7 +26,52 @@ and a one-trial tuning run. Each smoke run chooses a new output directory.
 
 TensorFlow uses CPU on native Windows; use Linux/WSL2 for TensorFlow CUDA.
 Install `requirements-torch.txt` only for Transformer training or checkpoint audit.
-Install `requirements-notebook.txt` to run the cleared `orchestration.ipynb` guide.
+For `orchestration.ipynb`, follow the [notebook setup](#run-the-notebook) below.
+
+## Run the notebook
+
+The virtual environment and the notebook kernel must use **Python 3.11**.
+Activating an environment in a terminal does not change the notebook's kernel.
+Run these commands from the repository root. If `.venv` already uses Python 3.11,
+skip the creation command and install the requirements into that environment.
+
+### Windows PowerShell
+
+Check `python --version` first: it must show **3.11.x**. If it shows another version,
+switch to an installed Python 3.11 interpreter before creating `.venv`.
+
+```powershell
+python --version
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-notebook.txt
+.\.venv\Scripts\python.exe -m ipykernel install --user --name sdss-dr12-py311 --display-name "SDSS DR12 (Python 3.11)"
+```
+
+### Linux
+
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt -r requirements-notebook.txt
+.venv/bin/python -m ipykernel install --user --name sdss-dr12-py311 --display-name "SDSS DR12 (Python 3.11)"
+```
+
+### Select the kernel in VS Code
+
+1. Open `orchestration.ipynb` and click **Select Kernel** at the top right.
+2. Choose **Select Another Kernel** if needed, then **Python Environments**, and
+   select the repository's **`.venv` (Python 3.11)**. Alternatively, choose
+   **Jupyter Kernels** and select **SDSS DR12 (Python 3.11)**.
+3. Restart the kernel and run all cells. The default example uses synthetic data
+   and one training epoch; expensive stages remain disabled until explicitly enabled.
+
+If the environment is missing from the picker, refresh it or run
+**Developer: Reload Window** from the command palette (`Ctrl+Shift+P`). In JupyterLab,
+select **SDSS DR12 (Python 3.11)** from the notebook's kernel menu.
+
+To confirm the selected kernel, run `import sys; print(sys.version); print(sys.executable)`
+in a notebook cell. The executable should point inside this repository's `.venv`.
+An `AttributeError` about `hashlib.file_digest` means the selected Python is too old:
+Python 3.10 does not provide that function. Select the project kernel and restart it.
 
 ## Train from public data
 
