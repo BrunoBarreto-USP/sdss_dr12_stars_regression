@@ -8,6 +8,56 @@ import numpy as np
 
 
 class AblationProtocolTests(unittest.TestCase):
+    def make_prediction_run(self, root, *, single_dataset_id="fixture", single_targets=None):
+        from stellar_workflow.config import TARGET_NAMES
+        from stellar_workflow.predictions import write_predictions
+        from stellar_workflow.runs import Run
+        run = Run(root / "run")
+        # Equal columns ensure target-name mistakes cannot be caught by labels alone.
+        truth = np.array([[1., 1., 1.], [2., 2., 2.]])
+        write_predictions(run.path / "test_predictions.npz", [1, 2], truth, truth, dataset_id="fixture")
+        for name in ("no_noise_augmentation", "no_skip", "no_layernorm", "no_residual_no_layernorm"):
+            folder = run.path / "ablations" / name
+            write_predictions(folder / "test_predictions.npz", [1, 2], truth, truth, dataset_id="fixture")
+            (folder / "metrics.json").write_text(json.dumps({"params": 1}))
+        for i, name in enumerate(("single_teff", "single_feh", "single_logg")):
+            folder = run.path / "ablations" / name
+            target = (single_targets or TARGET_NAMES)[i]
+            write_predictions(folder / "test_predictions.npz", [1, 2], truth[:, i:i+1], truth[:, i:i+1],
+                              dataset_id=single_dataset_id, target_names=(target,))
+            (folder / "metrics.json").write_text(json.dumps({"params": 1}))
+        return run
+
+    def test_single_target_comparison_rejects_other_dataset_before_reporting(self):
+        from stellar_workflow.evaluation import ablation_reports
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.make_prediction_run(Path(tmp), single_dataset_id="other-features")
+            with self.assertRaisesRegex(ValueError, "fingerprints"):
+                ablation_reports(run, n_boot=4)
+            self.assertFalse((run.path / "reports").exists())
+
+    def test_single_target_comparison_rejects_wrong_target_with_identical_labels(self):
+        from stellar_workflow.evaluation import ablation_reports
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.make_prediction_run(Path(tmp), single_targets=("[Fe/H]", "Teff", "log g"))
+            with self.assertRaisesRegex(ValueError, "target order"):
+                ablation_reports(run, n_boot=4)
+            self.assertFalse((run.path / "reports").exists())
+
+    def test_single_target_comparison_accepts_aligned_and_legacy_archives(self):
+        from stellar_workflow.evaluation import ablation_reports
+        with tempfile.TemporaryDirectory() as tmp:
+            for fingerprint in ("fixture", ""):
+                with self.subTest(fingerprint=fingerprint):
+                    root = Path(tmp) / (fingerprint or "legacy")
+                    run = self.make_prediction_run(root, single_dataset_id=fingerprint)
+                    rows = ablation_reports(run, n_boot=4)
+                    self.assertEqual(len(rows), 15)
+                    singles = [row for row in rows if row["variant"] == "no_multitask"]
+                    self.assertEqual(len(singles), 3)
+                    self.assertTrue(all(row["params"] == 3 and row["mae_difference"] == 0 for row in singles))
+                    self.assertTrue((run.path / "reports/ablations/ablation_summary.csv").is_file())
+
     def test_all_ablation_learning_rates_match_main_for_small_batches(self):
         from stellar_workflow.pipeline import make_fixture
         from stellar_workflow.datasets import load_compact

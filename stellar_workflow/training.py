@@ -215,7 +215,7 @@ def train_baselines(run, config, data, *, models=("ols", "ridge", "cnn", "dnn"),
         try:
             import torch
         except ImportError as error:
-            raise ImportError("Install requirements/transformer.txt for the Transformer baseline.") from error
+            raise ImportError("Install requirements-torch.txt for the Transformer baseline.") from error
         if not torch.cuda.is_available() and not allow_cpu:
             raise RuntimeError("Transformer training requires CUDA, or explicit --allow-cpu for debugging.")
     from .predictions import physical_predictions
@@ -233,6 +233,8 @@ def train_baselines(run, config, data, *, models=("ols", "ridge", "cnn", "dnn"),
                 args.data = (run.path / info["cache_relative"] / COMPACT_NAME).resolve()
                 args.output_dir = folder
                 args.epochs, args.batch_size, args.seed = config["epochs"], config["batch_size"], config["seed"]
+                args.aug_factor = config["augmentation"]["factor"]
+                args.noise_level = config["augmentation"]["noise_level"]
                 args.allow_cpu = allow_cpu
                 args.workers = 0
                 train_spectral_transformer(args)

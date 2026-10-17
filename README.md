@@ -73,6 +73,10 @@ in a notebook cell. The executable should point inside this repository's `.venv`
 An `AttributeError` about `hashlib.file_digest` means the selected Python is too old:
 Python 3.10 does not provide that function. Select the project kernel and restart it.
 
+Notebook commands have no time limit by default, so explicitly enabled full training
+and tuning can finish. Pass `timeout=SECONDS` to a `workflow(...)` call to impose a
+limit; expiry terminates that command and may leave an incomplete run directory.
+
 ## Train from public data
 
 ```powershell

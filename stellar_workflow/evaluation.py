@@ -93,8 +93,9 @@ def ablation_reports(run, *, n_boot=10000, output_dir=None, replace=False):
     for i, name in enumerate(("single_teff", "single_feh", "single_logg")):
         folder = run.path / "ablations" / name
         item = read_predictions(folder / "test_predictions.npz")
-        np.testing.assert_array_equal(item["test_ids"], base["test_ids"])
-        np.testing.assert_array_equal(item["y_true"], base["y_true"][:, i:i+1])
+        reference = {**base, "target_names": base["target_names"][i:i+1],
+                     "y_true": base["y_true"][:, i:i+1], "y_pred": base["y_pred"][:, i:i+1]}
+        assert_aligned(reference, item)
         singles.append(item["y_pred"][:, 0])
         info = json.loads((folder / "metrics.json").read_text())
         count += info.get("params", info.get("trainable_parameters"))

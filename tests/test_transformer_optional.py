@@ -26,6 +26,42 @@ class TransformerSelectionTests(unittest.TestCase):
             self.assertAlmostEqual(loss, 9173 / 4846, places=6)
 @unittest.skipUnless(importlib.util.find_spec("torch"), "Install optional Transformer requirements.")
 class TransformerExportGuards(unittest.TestCase):
+    def test_workflow_transformer_uses_requested_augmentation_in_checkpoint(self):
+        import json
+        import os
+        from pathlib import Path
+        import tempfile
+        from unittest.mock import patch
+        from stellar_workflow.config import load_config
+        from stellar_workflow.datasets import load_compact
+        from stellar_workflow.pipeline import make_fixture
+        from stellar_workflow.runs import Run, write_json
+        from stellar_workflow.training import train_baselines
+        from finetuning import train_spectral_transformer as trainer
+        from finetuning.checkpoint_io import load_checkpoint
+        import torch
+        torch.set_num_threads(2)
+        config = load_config(epochs=1, batch_size=8, seed=7)
+        config["augmentation"] = {"factor": 2, "noise_level": .2}
+        parse_args = trainer.parse_args
+        def small_architecture(argv):
+            return parse_args([*argv, "--d-model", "16", "--layers", "1", "--heads", "2"])
+        with tempfile.TemporaryDirectory(prefix="transformer workflow ") as tmp:
+            root = Path(tmp)
+            compact = make_fixture(root / "data")
+            run = Run(root / "run")
+            write_json(run.path / "data_reference.json", {"cache_relative": Path(os.path.relpath(compact.parent, run.path)).as_posix()})
+            with load_compact(compact) as data, patch.object(trainer, "parse_args", small_architecture):
+                train_baselines(run, config, data, models=["transformer"], allow_cpu=True)
+            folder = run.path / "baselines/transformer"
+            checkpoint = load_checkpoint(folder / "best_model.pt", map_location="cpu")
+            self.assertEqual(checkpoint["args"]["aug_factor"], 2)
+            self.assertEqual(checkpoint["args"]["noise_level"], .2)
+            self.assertEqual(checkpoint["args"]["seed"], 7)
+            saved = json.loads((folder / "configuration.json").read_text())
+            self.assertEqual(saved["augmentation"], {"factor": 2, "noise_level": .2})
+            self.assertEqual(run.read()["stages"]["baseline:transformer"]["status"], "complete")
+
     def test_tiny_transformer_exports_portable_aligned_run(self):
         import tempfile
         import json
